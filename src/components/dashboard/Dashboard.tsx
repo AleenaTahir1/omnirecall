@@ -29,6 +29,7 @@ import {
   stopGeneration,
   isCommandPaletteOpen,
   isMaximized,
+  setActiveModel,
 } from "../../stores/appStore";
 import { useChatSubmit, parseApiError } from "../../hooks/useChatSubmit";
 import { useDocumentLoader } from "../../hooks/useDocumentLoader";
@@ -184,8 +185,7 @@ export function Dashboard() {
   };
 
   const selectModel = (providerId: string, model: string) => {
-    activeProvider.value = providerId;
-    activeModel.value = model;
+    setActiveModel(providerId, model);
     setShowModelSelect(false);
   };
 

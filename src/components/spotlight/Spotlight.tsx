@@ -4,7 +4,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   viewMode,
   activeModel,
-  activeProvider,
   providers,
   isGenerating,
   currentQuery,
@@ -15,6 +14,7 @@ import {
   Document,
   stopGeneration,
   isCommandPaletteOpen,
+  setActiveModel,
 } from "../../stores/appStore";
 import { useChatSubmit } from "../../hooks/useChatSubmit";
 import { useDocumentLoader } from "../../hooks/useDocumentLoader";
@@ -134,8 +134,7 @@ export function Spotlight() {
   };
 
   const selectModel = (providerId: string, model: string) => {
-    activeProvider.value = providerId;
-    activeModel.value = model;
+    setActiveModel(providerId, model);
     setShowModelSelect(false);
   };
 
