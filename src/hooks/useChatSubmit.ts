@@ -18,7 +18,9 @@ import {
   ChatSession,
   estimateTokens,
   systemPrompt,
+  setSystemPrompt,
   stopGeneration,
+  isShortcutsHelpOpen,
 } from "../stores/appStore";
 
 /// If we don't see a stream chunk for this long, assume the connection is
@@ -36,6 +38,47 @@ interface DocumentWithContent {
 /// pasted megabytes of text (which would freeze the textarea). The error
 /// message points the user toward the document feature for large content.
 export const MAX_MESSAGE_CHARS = 200_000;
+
+/// Handle a slash command typed into the input. Returns true if the
+/// input was consumed (the caller should clear the input and skip the
+/// model send). Returns false if the command was unrecognized — in that
+/// case we let the message go through so the model can answer about it.
+///
+/// Supported:
+///   /clear            - drop the current conversation (no save)
+///   /new              - start a fresh chat
+///   /help             - open the keyboard shortcuts overlay
+///   /system <prompt>  - replace the persistent system prompt
+function handleSlashCommand(input: string, setError: (e: string | null) => void): boolean {
+  const space = input.indexOf(" ");
+  const cmd = (space === -1 ? input : input.slice(0, space)).toLowerCase();
+  const arg = space === -1 ? "" : input.slice(space + 1).trim();
+
+  switch (cmd) {
+    case "/clear":
+    case "/new": {
+      currentMessages.value = [];
+      activeSessionId.value = null;
+      activeBranchId.value = null;
+      setError(null);
+      return true;
+    }
+    case "/help": {
+      isShortcutsHelpOpen.value = true;
+      return true;
+    }
+    case "/system": {
+      if (!arg) {
+        setError("Usage: /system <your system prompt>");
+        return true;
+      }
+      setSystemPrompt(arg);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
 
 // Parse and simplify API error messages for user display
 export function parseApiError(err: any): string {
@@ -104,6 +147,16 @@ export function useChatSubmit(
 
   const handleSubmit = useCallback(async () => {
     if (!currentQuery.value.trim() || isGenerating.value) return;
+
+    // Slash commands. Handled before any provider/network checks so power
+    // users can /clear or /help even with no API key configured.
+    const trimmed = currentQuery.value.trim();
+    if (trimmed.startsWith("/")) {
+      if (handleSlashCommand(trimmed, setError)) {
+        currentQuery.value = "";
+        return;
+      }
+    }
 
     if (currentQuery.value.length > MAX_MESSAGE_CHARS) {
       setError(
