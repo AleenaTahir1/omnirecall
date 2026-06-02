@@ -44,7 +44,12 @@ export function Spotlight() {
   // Shared hooks - eliminates code duplication with Dashboard
   const { docsWithContent, totalDocsLoaded } = useDocumentLoader();
   const { handleSubmit, cleanupStream } = useChatSubmit(docsWithContent, setError);
-  const handleAutoResize = useAutoResize(60);
+  const { handleAutoResize, resize } = useAutoResize(60);
+
+  // Keep textarea height correct on programmatic value changes too.
+  useEffect(() => {
+    resize(inputRef.current);
+  }, [currentQuery.value, resize]);
 
   // Clean up stream listener on unmount
   useEffect(() => cleanupStream, [cleanupStream]);
@@ -227,7 +232,9 @@ export function Spotlight() {
             </div>
           ) : (
             <div className="p-3 space-y-3">
-              {currentMessages.value.map((msg, index) => (
+              {currentMessages.value.map((msg, index) => {
+                if (msg.role === "assistant" && !msg.content) return null;
+                return (
                 <div
                   key={msg.id}
                   className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-message-reveal`}
@@ -267,8 +274,9 @@ export function Spotlight() {
                     )}
                   </div>
                 </div>
-              ))}
-              {isGenerating.value && (
+                );
+              })}
+              {isGenerating.value && !currentMessages.value[currentMessages.value.length - 1]?.content && (
                 <div className="flex justify-start">
                   <div className="bg-bg-tertiary rounded-lg px-3 py-2.5">
                     <TypingIndicator className="text-accent-primary" />

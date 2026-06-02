@@ -70,19 +70,38 @@ export function Dashboard() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Whether the user is scrolled to (near) the bottom. Gates auto-scroll so
+  // streaming doesn't yank a user who has scrolled up to read history.
+  const isAtBottomRef = useRef(true);
 
   // Shared hooks - eliminates code duplication with Spotlight
   const { docsWithContent, loadingDocs, totalDocsLoaded } = useDocumentLoader();
   const { localSearchQuery, setLocalSearchQuery } = useDebouncedSearch(300);
   const { handleSubmit, regenerate, retryLast, cleanupStream } = useChatSubmit(docsWithContent, setError);
-  const handleAutoResize = useAutoResize(200);
+  const { handleAutoResize, resize } = useAutoResize(200);
+
+  // Keep the textarea height in sync with programmatic value changes (quick
+  // prompts, post-submit clear, retry) — onInput alone misses those.
+  useEffect(() => {
+    resize(inputRef.current);
+  }, [currentQuery.value, resize]);
 
   // Clean up stream listener on unmount
   useEffect(() => cleanupStream, [cleanupStream]);
 
+  // Auto-scroll on new content only when the user is already at the bottom, so
+  // streaming doesn't interrupt reading scrolled-up history.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    if (isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    }
   }, [currentMessages.value]);
+
+  // Always jump to the bottom when switching into a different conversation.
+  useEffect(() => {
+    isAtBottomRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+  }, [activeSessionId.value]);
 
   // Group sessions by date once per chatHistory change instead of on every
   // render. This was previously rebuilt inside the JSX IIFE on every signal
@@ -214,7 +233,7 @@ export function Dashboard() {
   return (
     <div className="h-full w-full flex bg-bg-primary">
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? "w-72" : "w-0"} transition-all duration-200 overflow-hidden border-r border-border bg-bg-secondary flex flex-col`}>
+      <div className={`${sidebarOpen ? "w-72" : "w-0"} transition-[width] duration-200 ease-out overflow-hidden border-r border-border bg-bg-secondary flex flex-col`}>
         {/* Sidebar Header */}
         <div className="p-3 border-b border-border space-y-2">
           <button
@@ -552,6 +571,7 @@ export function Dashboard() {
           onScroll={(e) => {
             const el = e.target as HTMLDivElement;
             const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+            isAtBottomRef.current = atBottom;
             setShowScrollBottom(!atBottom && currentMessages.value.length > 3);
           }}
         >
@@ -649,7 +669,11 @@ export function Dashboard() {
                 );
               })()}
 
-              {currentMessages.value.map((message, index) => (
+              {currentMessages.value.map((message, index) => {
+                // Skip the empty assistant placeholder while streaming — the
+                // typing indicator stands in for it until the first chunk.
+                if (message.role === "assistant" && !message.content) return null;
+                return (
                 <div
                   key={message.id}
                   className={`group flex ${message.role === "user" ? "justify-end" : "justify-start"} animate-message-reveal`}
@@ -731,9 +755,10 @@ export function Dashboard() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
 
-              {isGenerating.value && (
+              {isGenerating.value && !currentMessages.value[currentMessages.value.length - 1]?.content && (
                 <div className="flex justify-start">
                   <div className="bg-bg-secondary text-text-primary border border-border rounded-xl px-4 py-3">
                     <TypingIndicator className="text-accent-primary" />
@@ -748,7 +773,7 @@ export function Dashboard() {
           {/* Scroll to Bottom Button */}
           {showScrollBottom && (
             <button
-              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+              onClick={() => { isAtBottomRef.current = true; messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }}
               className="absolute bottom-4 right-6 p-2 rounded-full bg-bg-secondary border border-border shadow-lg hover:bg-bg-tertiary transition-colors z-10"
               aria-label="Scroll to bottom"
               title="Scroll to bottom"
