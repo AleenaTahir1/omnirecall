@@ -101,6 +101,40 @@ export const isFullscreen = signal(false);
 // listeners.
 export const isOnline = signal(typeof navigator !== "undefined" ? navigator.onLine : true);
 
+// True while files are being dragged over the window (drives the drop overlay).
+export const isDragOver = signal(false);
+
+// Extensions accepted via drag-drop (mirrors the file-picker filters + backend
+// allow-list).
+const DROP_ALLOWED_EXT = [
+  "pdf", "txt", "md", "rst", "html", "htm", "py", "js", "ts", "tsx", "jsx", "rs",
+  "java", "cpp", "c", "h", "hpp", "go", "rb", "php", "swift", "kt", "cs", "json",
+  "yaml", "yml", "toml", "xml", "csv", "sh", "ps1", "sql", "log", "conf", "ini",
+  "env", "docx",
+];
+
+/// Add files dropped onto the window as documents. Filters to supported
+/// extensions and de-dupes by path. Returns how many were added.
+export function addDroppedFiles(paths: string[]): number {
+  let added = 0;
+  for (const filePath of paths) {
+    const name = filePath.split(/[/\\]/).pop() || "Unknown";
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    if (!DROP_ALLOWED_EXT.includes(ext)) continue;
+    if (documents.value.some(d => d.path === filePath)) continue;
+    addDocument({
+      id: crypto.randomUUID(),
+      name,
+      path: filePath,
+      size: 0,
+      type: ext,
+      addedAt: new Date().toISOString(),
+    });
+    added++;
+  }
+  return added;
+}
+
 // Keyboard Shortcuts Help
 export const isShortcutsHelpOpen = signal(false);
 

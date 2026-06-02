@@ -11,6 +11,7 @@ import {
   addDocument,
   Document,
   stopGeneration,
+  startNewChat,
   isCommandPaletteOpen,
 } from "../../stores/appStore";
 import { useChatSubmit } from "../../hooks/useChatSubmit";
@@ -43,7 +44,7 @@ export function Spotlight() {
 
   // Shared hooks - eliminates code duplication with Dashboard
   const { docsWithContent, totalDocsLoaded } = useDocumentLoader();
-  const { handleSubmit, cleanupStream } = useChatSubmit(docsWithContent, setError);
+  const { handleSubmit, regenerate, cleanupStream } = useChatSubmit(docsWithContent, setError);
   const { handleAutoResize, resize } = useAutoResize(60);
 
   // Keep textarea height correct on programmatic value changes too.
@@ -88,9 +89,9 @@ export function Spotlight() {
   };
 
   const handleClear = () => {
-    currentQuery.value = "";
-    currentMessages.value = [];
-    activeSessionId.value = null;
+    // startNewChat also resets the active branch (handleClear used to leave it
+    // stale, which could write into a non-existent branch on the next send).
+    startNewChat();
     setError(null);
     inputRef.current?.focus();
   };
@@ -223,6 +224,19 @@ export function Spotlight() {
                     ? "Ask questions about your documents"
                     : "Chat, analyze, or add documents for RAG"}
                 </p>
+                {totalDocsLoaded === 0 && (
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 mb-3">
+                    {["Summarize this", "Explain simply", "Brainstorm ideas"].map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => { currentQuery.value = q; inputRef.current?.focus(); }}
+                        className="px-2 py-1 rounded-md border border-border text-[11px] text-text-secondary hover:bg-bg-tertiary hover:text-text-primary transition-colors"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-text-tertiary">
                   <span><kbd className="px-1 py-0.5 bg-bg-tertiary rounded border border-border">Enter</kbd> send</span>
                   <span><kbd className="px-1 py-0.5 bg-bg-tertiary rounded border border-border">Ctrl+K</kbd> commands</span>
@@ -264,6 +278,16 @@ export function Spotlight() {
                         >
                           {copiedMessageId === msg.id ? <CheckIcon size={10} /> : <CopyIcon size={10} />}
                         </button>
+                        {msg.role === "assistant" && index === currentMessages.value.length - 1 && !isGenerating.value && activeSessionId.value && (
+                          <button
+                            onClick={() => regenerate(msg.id)}
+                            className="p-0.5 rounded text-text-tertiary hover:text-text-primary"
+                            title="Regenerate response"
+                            aria-label="Regenerate response"
+                          >
+                            <RefreshIcon size={10} />
+                          </button>
+                        )}
                         {msg.tokenCount && msg.tokenCount > 10 && (
                           <span className={`text-[10px] ${msg.role === "user" ? "text-on-accent opacity-60" : "text-text-tertiary/60"
                             }`}>

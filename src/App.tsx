@@ -1,5 +1,7 @@
 import { useEffect } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { toast } from "./stores/toastStore";
 import {
   viewMode,
   theme,
@@ -12,6 +14,8 @@ import {
   isFullscreen,
   isShortcutsHelpOpen,
   isOnline,
+  isDragOver,
+  addDroppedFiles,
   loadPersistedData,
   applyThemeClasses,
   flushPendingSaves,
@@ -60,6 +64,26 @@ export function App() {
     const handleOffline = () => { isOnline.value = false; };
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+
+    // OS-level file drag-and-drop → add as documents (the feature the
+    // onboarding tour advertises). Shows a drop overlay while hovering.
+    let unlistenDrop: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const p = event.payload as { type: string; paths?: string[] };
+        if (p.type === "enter" || p.type === "over") {
+          isDragOver.value = true;
+        } else if (p.type === "leave") {
+          isDragOver.value = false;
+        } else if (p.type === "drop") {
+          isDragOver.value = false;
+          const n = addDroppedFiles(p.paths ?? []);
+          if (n > 0) toast.success(`Added ${n} document${n > 1 ? "s" : ""}`);
+          else toast.warning("No supported files in that drop");
+        }
+      })
+      .then((fn) => { unlistenDrop = fn; })
+      .catch(() => {});
 
     const handleKeyDown = async (e: KeyboardEvent) => {
       // Command Palette (Ctrl+K)
@@ -183,6 +207,7 @@ export function App() {
       window.removeEventListener("pagehide", handleUnload);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      unlistenDrop?.();
       document.removeEventListener("contextmenu", handleContextMenu);
     };
   }, []);
@@ -201,6 +226,14 @@ export function App() {
       <ToastContainer />
       <KeyboardShortcuts />
       <Onboarding />
+      {isDragOver.value && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-accent-primary/10 backdrop-blur-sm border-4 border-dashed border-accent-primary pointer-events-none">
+          <div className="text-center px-6 py-4 rounded-xl bg-bg-primary/90 border border-border shadow-2xl">
+            <p className="text-lg font-semibold text-text-primary">Drop files to add as documents</p>
+            <p className="text-sm text-text-secondary mt-1">PDF, text, markdown, code, and more</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
