@@ -11,6 +11,7 @@ import {
   isGenerating,
   isFullscreen,
   isShortcutsHelpOpen,
+  isOnline,
   loadPersistedData,
   applyThemeClasses,
   flushPendingSaves,
@@ -53,6 +54,12 @@ export function App() {
     };
     window.addEventListener("beforeunload", handleUnload);
     window.addEventListener("pagehide", handleUnload);
+
+    // Track connectivity so the UI can show an Offline pill and block cloud sends.
+    const handleOnline = () => { isOnline.value = true; };
+    const handleOffline = () => { isOnline.value = false; };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
 
     const handleKeyDown = async (e: KeyboardEvent) => {
       // Command Palette (Ctrl+K)
@@ -174,6 +181,8 @@ export function App() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("beforeunload", handleUnload);
       window.removeEventListener("pagehide", handleUnload);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       document.removeEventListener("contextmenu", handleContextMenu);
     };
   }, []);

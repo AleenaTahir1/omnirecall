@@ -31,6 +31,28 @@ export function LogoIcon({ size = 32, className = "" }: IconProps) {
   );
 }
 
+export function PinIcon({ size = 20, className = "" }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 20 20"
+      fill="none"
+      className={className}
+    >
+      <path
+        d="M12.5 2.5 17.5 7.5M11 4 4 11l-1.5 4.5L7 14l7-7M9 6l5 5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function SearchIcon({ size = 20, className = "" }: IconProps) {
   return (
     <svg

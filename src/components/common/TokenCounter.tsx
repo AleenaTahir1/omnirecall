@@ -1,4 +1,11 @@
-import { estimateTokens, currentSessionTokenCount, currentMessages } from "../../stores/appStore";
+import {
+    estimateTokens,
+    currentSessionTokenCount,
+    currentMessages,
+    contextUsageFraction,
+    activeModel,
+    getContextWindow,
+} from "../../stores/appStore";
 import { TokenIcon } from "../icons";
 
 interface TokenCounterProps {
@@ -8,6 +15,9 @@ interface TokenCounterProps {
 
 export function TokenCounter({ className = "", showDetails = false }: TokenCounterProps) {
     const totalTokens = currentSessionTokenCount.value;
+    const windowTokens = getContextWindow(activeModel.value);
+    const fraction = contextUsageFraction.value;
+    const pct = Math.min(100, Math.round(fraction * 100));
 
     // Format large numbers
     const formatTokens = (n: number): string => {
@@ -16,19 +26,20 @@ export function TokenCounter({ className = "", showDetails = false }: TokenCount
         return n.toString();
     };
 
-    // Get color based on token count (relative to common context limits)
-    const getTokenColor = (tokens: number): string => {
-        if (tokens < 8000) return "text-success";
-        if (tokens < 32000) return "text-warning";
-        return "text-error";
-    };
+    // Color + level are driven by usage relative to the active model's window,
+    // not absolute counts. The level word makes the state non-color-only.
+    const level = fraction < 0.6 ? "ok" : fraction < 0.85 ? "high" : "very-high";
+    const color = level === "ok" ? "text-success" : level === "high" ? "text-warning" : "text-error";
+    const ariaText =
+        `Context usage ${pct}% — ${formatTokens(totalTokens)} of ${formatTokens(windowTokens)} tokens` +
+        (level === "ok" ? "" : level === "high" ? ", high usage" : ", very high usage — consider a new chat");
 
     if (!showDetails) {
         return (
-            <div className={`flex items-center gap-1.5 ${className}`} title="Estimated token count">
-                <TokenIcon size={14} className={getTokenColor(totalTokens)} />
-                <span className={`text-xs ${getTokenColor(totalTokens)}`}>
-                    {formatTokens(totalTokens)}
+            <div className={`flex items-center gap-1.5 ${className}`} title={ariaText} aria-label={ariaText}>
+                <TokenIcon size={14} className={color} />
+                <span className={`text-xs ${color}`}>
+                    {pct}%
                 </span>
             </div>
         );
@@ -46,9 +57,9 @@ export function TokenCounter({ className = "", showDetails = false }: TokenCount
     return (
         <div className={`flex flex-col gap-1 ${className}`}>
             <div className="flex items-center gap-2">
-                <TokenIcon size={16} className={getTokenColor(totalTokens)} />
-                <span className={`text-sm font-medium ${getTokenColor(totalTokens)}`}>
-                    {formatTokens(totalTokens)} tokens
+                <TokenIcon size={16} className={color} />
+                <span className={`text-sm font-medium ${color}`}>
+                    {formatTokens(totalTokens)} / {formatTokens(windowTokens)} ({pct}%)
                 </span>
             </div>
             <div className="flex items-center gap-4 text-xs text-text-tertiary">

@@ -96,6 +96,11 @@ export const compareResponses = signal<{ model: string; content: string; isLoadi
 export const isMaximized = signal(false);
 export const isFullscreen = signal(false);
 
+// Connectivity — reflected in the header and used to short-circuit cloud sends
+// while offline (local Ollama still works). Updated by App.tsx online/offline
+// listeners.
+export const isOnline = signal(typeof navigator !== "undefined" ? navigator.onLine : true);
+
 // Keyboard Shortcuts Help
 export const isShortcutsHelpOpen = signal(false);
 
@@ -292,6 +297,35 @@ export function estimateTokens(text: string): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
 }
+
+// Approximate context-window sizes (tokens) so the UI can show usage as a
+// fraction of the active model's window rather than an absolute count. Matched
+// by substring against the model id; falls back to a conservative default.
+const CONTEXT_WINDOWS: { match: string; tokens: number }[] = [
+  { match: "gemini-3", tokens: 1_000_000 },
+  { match: "gemini-2.5", tokens: 1_000_000 },
+  { match: "gemini", tokens: 1_000_000 },
+  { match: "gpt-4o", tokens: 128_000 },
+  { match: "gpt-4-turbo", tokens: 128_000 },
+  { match: "gpt-4", tokens: 128_000 },
+  { match: "claude", tokens: 200_000 },
+  { match: "glm-4.6", tokens: 200_000 },
+  { match: "glm-4.7", tokens: 200_000 },
+  { match: "glm", tokens: 128_000 },
+];
+const DEFAULT_CONTEXT_WINDOW = 32_000;
+
+export function getContextWindow(model: string): number {
+  const m = model.toLowerCase();
+  const hit = CONTEXT_WINDOWS.find(c => m.includes(c.match));
+  return hit ? hit.tokens : DEFAULT_CONTEXT_WINDOW;
+}
+
+// Fraction (0-1) of the active model's context window used by the current chat.
+export const contextUsageFraction = computed(() => {
+  const used = currentMessages.value.reduce((sum, msg) => sum + (msg.tokenCount || 0), 0);
+  return used / getContextWindow(activeModel.value);
+});
 
 // Search chat history
 export function searchChatHistory(query: string): SearchResult[] {
@@ -1023,27 +1057,77 @@ export function exportAllSessions(): string {
 export function importSession(jsonString: string): ChatSession | null {
   try {
     const data = JSON.parse(jsonString);
-    if (data.id && data.title && Array.isArray(data.messages)) {
-      const session: ChatSession = {
-        id: crypto.randomUUID(), // Generate new ID to avoid conflicts
-        title: data.title,
-        messages: data.messages.map((m: any) => ({
-          id: crypto.randomUUID(),
-          role: m.role,
-          content: m.content,
-          tokenCount: estimateTokens(m.content),
-        })),
-        branches: [],
-        branchMessages: {},
-        createdAt: new Date().toISOString(),
-        folderId: null,
-      };
-      addChatSession(session);
-      return session;
-    }
-    return null;
+    if (!data || !data.title || !Array.isArray(data.messages)) return null;
+    // Preserve message + branch ids so branch lineage (fromMessageId,
+    // branchMessages keys) stays intact on round-trip. Only the session id is
+    // regenerated to avoid collisions with an existing session.
+    const session: ChatSession = {
+      id: crypto.randomUUID(),
+      title: String(data.title),
+      messages: data.messages.map((m: any) => ({
+        id: m.id || crypto.randomUUID(),
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: String(m.content ?? ""),
+        tokenCount: m.tokenCount ?? estimateTokens(String(m.content ?? "")),
+        parentId: m.parentId ?? null,
+        branchIndex: m.branchIndex,
+      })),
+      branches: Array.isArray(data.branches) ? data.branches : [],
+      branchMessages:
+        data.branchMessages && typeof data.branchMessages === "object" ? data.branchMessages : {},
+      createdAt: data.createdAt || new Date().toISOString(),
+      folderId: null,
+    };
+    addChatSession(session);
+    return session;
   } catch (e) {
     console.error("Failed to import session:", e);
+    return null;
+  }
+}
+
+/// Import the full backup envelope produced by exportAllSessions
+/// ({ version, sessions, folders }). Restores folders and every session,
+/// preserving ids (so folder assignments survive). Returns the number of
+/// sessions imported, or null if the JSON isn't a recognizable envelope.
+export function importAllSessions(jsonString: string): number | null {
+  try {
+    const data = JSON.parse(jsonString);
+    if (!data || !Array.isArray(data.sessions)) return null;
+
+    if (Array.isArray(data.folders)) {
+      const existingIds = new Set(chatFolders.value.map(f => f.id));
+      const incoming = data.folders.filter((f: any) => f && f.id && f.name && !existingIds.has(f.id));
+      if (incoming.length > 0) {
+        chatFolders.value = [...chatFolders.value, ...incoming];
+      }
+    }
+
+    const existingSessionIds = new Set(chatHistory.value.map(s => s.id));
+    let count = 0;
+    const restored: ChatSession[] = [];
+    for (const s of data.sessions) {
+      if (!s || !s.title || !Array.isArray(s.messages) || existingSessionIds.has(s.id)) continue;
+      restored.push({
+        id: s.id || crypto.randomUUID(),
+        title: String(s.title),
+        messages: s.messages,
+        branches: Array.isArray(s.branches) ? s.branches : [],
+        branchMessages: s.branchMessages && typeof s.branchMessages === "object" ? s.branchMessages : {},
+        createdAt: s.createdAt || new Date().toISOString(),
+        folderId: s.folderId ?? null,
+        isPinned: s.isPinned,
+      });
+      count++;
+    }
+    if (restored.length > 0) {
+      chatHistory.value = [...restored, ...chatHistory.value];
+    }
+    saveChatHistoryNow();
+    saveChatFolders();
+    return count;
+  } catch (e) {
+    console.error("Failed to import backup:", e);
     return null;
   }
 }

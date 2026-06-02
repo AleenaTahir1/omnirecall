@@ -3,6 +3,7 @@ import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
     exportSession,
     importSession,
+    importAllSessions,
     chatHistory,
     ChatSession,
 } from "../../stores/appStore";
@@ -29,7 +30,22 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
     const [copied, setCopied] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState<string | null>(null); // null = main
     const panelRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     useFocusTrap(panelRef, true, onClose);
+
+    const handleFile = async (e: Event) => {
+        const input = e.target as HTMLInputElement;
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+            const text = await file.text();
+            setImportText(text);
+            setImportResult(null);
+        } catch {
+            setImportResult("error");
+        }
+        input.value = "";
+    };
 
     // Get branches for current session
     const getBranches = () => {
@@ -73,13 +89,20 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
     };
 
     const handleImport = () => {
+        // Try the full-backup envelope first (version/sessions/folders), then
+        // fall back to a single-session import.
+        const bulk = importAllSessions(importText);
+        if (bulk !== null) {
+            setImportResult("success");
+            setImportText("");
+            setTimeout(() => { onClose?.(); }, 1500);
+            return;
+        }
         const result = importSession(importText);
         if (result) {
             setImportResult("success");
             setImportText("");
-            setTimeout(() => {
-                onClose?.();
-            }, 1500);
+            setTimeout(() => { onClose?.(); }, 1500);
         } else {
             setImportResult("error");
         }
@@ -241,9 +264,26 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                     ) : (
                         <div className="space-y-4">
                             <div>
-                                <label className="text-sm text-text-secondary mb-2 block">
-                                    Paste JSON export
-                                </label>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="text-sm text-text-secondary">
+                                        Paste JSON, or import a file
+                                    </label>
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-bg-secondary border border-border rounded hover:bg-bg-tertiary text-text-secondary"
+                                    >
+                                        <UploadIcon size={12} />
+                                        Choose file…
+                                    </button>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".json,application/json"
+                                        onChange={handleFile}
+                                        className="hidden"
+                                        aria-hidden="true"
+                                    />
+                                </div>
                                 <textarea
                                     value={importText}
                                     onInput={(e) => {

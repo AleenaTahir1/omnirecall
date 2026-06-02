@@ -17,6 +17,7 @@ import {
   branchFromMessage,
   startNewChat,
   getSemanticContext,
+  isOnline,
   ChatMessage,
   ChatSession,
   estimateTokens,
@@ -324,6 +325,12 @@ export function useChatSubmit(
       setError(
         `No API key for ${provider?.name ?? activeProvider.value}. Open Settings (Ctrl+,) to add one.`,
       );
+      return;
+    }
+
+    // Cloud providers need connectivity; local Ollama doesn't.
+    if (!isOnline.value && provider?.id !== "ollama") {
+      setError("You're offline. Reconnect, or switch to a local Ollama model.");
       return;
     }
 
