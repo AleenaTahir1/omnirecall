@@ -213,6 +213,7 @@ function ProviderCardCompact({ provider }: { provider: any }) {
     setTestMessage(null);
     try {
       await invoke("test_api_key", { provider: provider.id, apiKey, baseUrl: effectiveBaseUrl });
+      updateProviderApiKey(provider.id, apiKey);
       setTestResult("success");
       setTestMessage("✓ Connected!");
       setProviderConnected(provider.id, true);
@@ -269,7 +270,11 @@ function ProviderCardCompact({ provider }: { provider: any }) {
               <input
                 type={showKey ? "text" : "password"}
                 value={apiKey}
-                onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
+                onInput={(e) => {
+                  setApiKey((e.target as HTMLInputElement).value);
+                  if (testResult !== null) { setTestResult(null); setTestMessage(null); }
+                  if (provider.isConnected) setProviderConnected(provider.id, false);
+                }}
                 onBlur={handleSave}
                 placeholder="API key..."
                 aria-label={`${provider.name} API key`}
@@ -286,7 +291,7 @@ function ProviderCardCompact({ provider }: { provider: any }) {
                 testResult === "success" ? "bg-success/20 text-success border border-success/30" :
                   testResult === "error" ? "bg-error/20 text-error border border-error/30" :
                     !apiKey ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed" :
-                      "bg-accent-primary text-white hover:bg-accent-primary/90"
+                      "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                 }`}
             >
               {testing ? <SpinnerIcon size={12} className="mx-auto animate-spin" /> :
@@ -315,7 +320,7 @@ function ProviderCardCompact({ provider }: { provider: any }) {
           <button onClick={handleTest} disabled={testing} className={`w-full px-2 py-1.5 rounded text-xs font-medium transition-all ${testing ? "bg-bg-tertiary text-text-tertiary" :
             testResult === "success" ? "bg-success/20 text-success" :
               testResult === "error" ? "bg-error/20 text-error" :
-                "bg-accent-primary text-white hover:bg-accent-primary/90"
+                "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
             }`}>
             {testing ? "Testing..." : testResult === "success" ? "✓ Connected" : testResult === "error" ? "Connection Failed" : "Test Ollama"}
           </button>
@@ -539,6 +544,9 @@ function ProviderCard({ provider }: { provider: any }) {
     setTestMessage(null);
     try {
       await invoke("test_api_key", { provider: provider.id, apiKey, baseUrl: effectiveBaseUrl });
+      // Persist the exact key that was just validated so the saved key and the
+      // verified state can't diverge.
+      updateProviderApiKey(provider.id, apiKey);
       setTestResult("success");
       setTestMessage("✓ Connection successful! API key is valid.");
       setProviderConnected(provider.id, true);
@@ -592,7 +600,12 @@ function ProviderCard({ provider }: { provider: any }) {
               <input
                 type={showKey ? "text" : "password"}
                 value={apiKey}
-                onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
+                onInput={(e) => {
+                  setApiKey((e.target as HTMLInputElement).value);
+                  // Editing the key invalidates the prior test result.
+                  if (testResult !== null) { setTestResult(null); setTestMessage(null); }
+                  if (provider.isConnected) setProviderConnected(provider.id, false);
+                }}
                 onBlur={handleSave}
                 placeholder="Enter API key..."
                 className="w-full px-3 py-2 pr-9 bg-bg-tertiary border border-border rounded-lg text-text-primary text-sm outline-none focus:border-accent-primary transition-colors"
@@ -608,7 +621,7 @@ function ProviderCard({ provider }: { provider: any }) {
                 testResult === "success" ? "bg-success/20 text-success border border-success/30" :
                   testResult === "error" ? "bg-error/20 text-error border border-error/30" :
                     !apiKey ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed" :
-                      "bg-accent-primary text-white hover:bg-accent-primary/90"
+                      "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                 }`}
             >
               {testing ? (
@@ -653,7 +666,7 @@ function ProviderCard({ provider }: { provider: any }) {
             className={`w-full px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${testing ? "bg-bg-tertiary text-text-tertiary" :
               testResult === "success" ? "bg-success/20 text-success" :
                 testResult === "error" ? "bg-error/20 text-error" :
-                  "bg-accent-primary text-white hover:bg-accent-primary/90"
+                  "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
               }`}
           >
             {testing ? "Testing..." : testResult === "success" ? "✓ Connected" : testResult === "error" ? "Connection Failed" : "Test Connection"}
@@ -918,7 +931,7 @@ function BehaviorTab({ compact = false }: { compact?: boolean }) {
               className={`px-3 py-1 rounded font-medium transition-colors ${
                 !isDirty || tooLong
                   ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
-                  : "bg-accent-primary text-white hover:bg-accent-primary/90"
+                  : "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
               }`}
             >
               Save
@@ -960,8 +973,9 @@ function PrivacyTab({ compact = false }: { compact?: boolean }) {
   const handleReset = async () => {
     if (!confirmingReset) {
       setConfirmingReset(true);
-      // Auto-cancel the "are you sure" if the user wanders off.
-      setTimeout(() => setConfirmingReset(prev => prev), 5000);
+      // Auto-cancel the "are you sure" if the user wanders off. (Previously a
+      // no-op: setConfirmingReset(prev => prev) never disarmed.)
+      setTimeout(() => setConfirmingReset(false), 5000);
       return;
     }
     setResetting(true);
@@ -1001,7 +1015,7 @@ function PrivacyTab({ compact = false }: { compact?: boolean }) {
           className={`mt-2 w-full px-3 py-2 rounded-lg font-medium transition-colors ${
             chatHistory.value.length === 0
               ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
-              : "bg-accent-primary text-white hover:bg-accent-primary/90"
+              : "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
           } ${compact ? "text-xs py-1.5" : "text-sm"}`}
         >
           {chatHistory.value.length === 0

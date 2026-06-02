@@ -1,5 +1,7 @@
 import { useEffect } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { toast } from "./stores/toastStore";
 import {
   viewMode,
   theme,
@@ -7,15 +9,19 @@ import {
   isCommandPaletteOpen,
   isCompareMode,
   currentMessages,
-  activeSessionId,
-  chatHistory,
   stopGeneration,
   isGenerating,
   isFullscreen,
   isShortcutsHelpOpen,
+  isOnline,
+  isDragOver,
+  addDroppedFiles,
   loadPersistedData,
   applyThemeClasses,
   flushPendingSaves,
+  startNewChat,
+  loadSessionByIndex,
+  loadAdjacentSession,
 } from "./stores/appStore";
 import { Spotlight } from "./components/spotlight/Spotlight";
 import { Dashboard } from "./components/dashboard/Dashboard";
@@ -53,6 +59,32 @@ export function App() {
     window.addEventListener("beforeunload", handleUnload);
     window.addEventListener("pagehide", handleUnload);
 
+    // Track connectivity so the UI can show an Offline pill and block cloud sends.
+    const handleOnline = () => { isOnline.value = true; };
+    const handleOffline = () => { isOnline.value = false; };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    // OS-level file drag-and-drop → add as documents (the feature the
+    // onboarding tour advertises). Shows a drop overlay while hovering.
+    let unlistenDrop: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const p = event.payload as { type: string; paths?: string[] };
+        if (p.type === "enter" || p.type === "over") {
+          isDragOver.value = true;
+        } else if (p.type === "leave") {
+          isDragOver.value = false;
+        } else if (p.type === "drop") {
+          isDragOver.value = false;
+          const n = addDroppedFiles(p.paths ?? []);
+          if (n > 0) toast.success(`Added ${n} document${n > 1 ? "s" : ""}`);
+          else toast.warning("No supported files in that drop");
+        }
+      })
+      .then((fn) => { unlistenDrop = fn; })
+      .catch(() => {});
+
     const handleKeyDown = async (e: KeyboardEvent) => {
       // Command Palette (Ctrl+K)
       if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
@@ -64,8 +96,7 @@ export function App() {
       // New Chat (Ctrl+N)
       if (e.key === "n" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        currentMessages.value = [];
-        activeSessionId.value = null;
+        startNewChat();
         return;
       }
 
@@ -106,39 +137,21 @@ export function App() {
       // Quick Chat Navigation (Ctrl+1-9)
       if ((e.ctrlKey || e.metaKey) && e.key >= "1" && e.key <= "9") {
         e.preventDefault();
-        const index = parseInt(e.key) - 1;
-        if (chatHistory.value[index]) {
-          currentMessages.value = chatHistory.value[index].messages;
-          activeSessionId.value = chatHistory.value[index].id;
-        }
+        loadSessionByIndex(parseInt(e.key) - 1);
         return;
       }
 
       // Previous Chat (Ctrl+[)
       if (e.key === "[" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        if (activeSessionId.value) {
-          const currentIndex = chatHistory.value.findIndex(s => s.id === activeSessionId.value);
-          if (currentIndex > 0) {
-            const prevSession = chatHistory.value[currentIndex - 1];
-            currentMessages.value = prevSession.messages;
-            activeSessionId.value = prevSession.id;
-          }
-        }
+        loadAdjacentSession(-1);
         return;
       }
 
       // Next Chat (Ctrl+])
       if (e.key === "]" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        if (activeSessionId.value) {
-          const currentIndex = chatHistory.value.findIndex(s => s.id === activeSessionId.value);
-          if (currentIndex < chatHistory.value.length - 1) {
-            const nextSession = chatHistory.value[currentIndex + 1];
-            currentMessages.value = nextSession.messages;
-            activeSessionId.value = nextSession.id;
-          }
-        }
+        loadAdjacentSession(1);
         return;
       }
 
@@ -192,6 +205,9 @@ export function App() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("beforeunload", handleUnload);
       window.removeEventListener("pagehide", handleUnload);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      unlistenDrop?.();
       document.removeEventListener("contextmenu", handleContextMenu);
     };
   }, []);
@@ -210,6 +226,14 @@ export function App() {
       <ToastContainer />
       <KeyboardShortcuts />
       <Onboarding />
+      {isDragOver.value && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-accent-primary/10 backdrop-blur-sm border-4 border-dashed border-accent-primary pointer-events-none">
+          <div className="text-center px-6 py-4 rounded-xl bg-bg-primary/90 border border-border shadow-2xl">
+            <p className="text-lg font-semibold text-text-primary">Drop files to add as documents</p>
+            <p className="text-sm text-text-secondary mt-1">PDF, text, markdown, code, and more</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

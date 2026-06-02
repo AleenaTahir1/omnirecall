@@ -9,7 +9,6 @@ import {
     updateSessionFolder,
     ChatFolder,
     activeSessionId,
-    currentMessages,
 } from "../../stores/appStore";
 import {
     FolderIcon,
@@ -144,7 +143,7 @@ export function FolderManager({ onSelectSession }: FolderManagerProps) {
                         />
                         <button
                             onClick={handleAddFolder}
-                            className="p-1.5 bg-accent-primary text-white rounded hover:bg-accent-primary/90"
+                            className="p-1.5 bg-accent-primary text-on-accent rounded hover:bg-accent-primary/90"
                         >
                             <CheckIcon size={12} />
                         </button>
@@ -171,7 +170,7 @@ export function FolderManager({ onSelectSession }: FolderManagerProps) {
                         </p>
                         <button
                             onClick={() => setIsAddingFolder(true)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-accent-primary text-white text-xs hover:bg-accent-primary/90 transition-colors"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-accent-primary text-on-accent text-xs hover:bg-accent-primary/90 transition-colors"
                         >
                             <PlusIcon size={12} />
                             New folder
@@ -223,12 +222,12 @@ export function FolderManager({ onSelectSession }: FolderManagerProps) {
                                 key={session.id}
                                 draggable
                                 onDragStart={(e) => handleDragStart(session.id, e)}
-                                onClick={() => {
-                                    currentMessages.value = session.messages;
-                                    activeSessionId.value = session.id;
-                                    onSelectSession(session.id);
-                                }}
-                                className={`px-3 py-2 cursor-grab active:cursor-grabbing transition-colors ${activeSessionId.value === session.id
+                                onClick={() => onSelectSession(session.id)}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(session.id); } }}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`Open chat ${session.title}`}
+                                className={`px-3 py-2 cursor-grab active:cursor-grabbing transition-colors outline-none focus-visible:bg-bg-tertiary ${activeSessionId.value === session.id
                                     ? "bg-accent-primary/10 text-accent-primary"
                                     : "hover:bg-bg-tertiary text-text-primary"
                                     }`}
@@ -373,11 +372,12 @@ function FolderItem({
                                 key={session.id}
                                 draggable
                                 onDragStart={(e) => onSessionDragStart(session.id, e)}
-                                onClick={() => {
-                                    currentMessages.value = session.messages;
-                                    onSelectSession(session.id);
-                                }}
-                                className={`px-2 py-1.5 rounded cursor-pointer transition-colors ${activeSessionId === session.id
+                                onClick={() => onSelectSession(session.id)}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(session.id); } }}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`Open chat ${session.title}`}
+                                className={`px-2 py-1.5 rounded cursor-pointer transition-colors outline-none focus-visible:bg-bg-tertiary ${activeSessionId === session.id
                                     ? "bg-accent-primary/10 text-accent-primary"
                                     : "hover:bg-bg-tertiary text-text-primary"
                                     }`}

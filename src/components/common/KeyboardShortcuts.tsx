@@ -1,4 +1,6 @@
+import { useRef } from "preact/hooks";
 import { isShortcutsHelpOpen, viewMode } from "../../stores/appStore";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { CloseIcon, CommandIcon } from "../icons";
 
 interface ShortcutGroup {
@@ -67,6 +69,9 @@ const fullShortcutGroups: ShortcutGroup[] = [
 ];
 
 export function KeyboardShortcuts() {
+    const panelRef = useRef<HTMLDivElement>(null);
+    useFocusTrap(panelRef, isShortcutsHelpOpen.value);
+
     if (!isShortcutsHelpOpen.value) return null;
 
     const isSpotlight = viewMode.value === "spotlight";
@@ -80,6 +85,10 @@ export function KeyboardShortcuts() {
                 onClick={() => (isShortcutsHelpOpen.value = false)}
             >
                 <div
+                    ref={panelRef}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Keyboard shortcuts"
                     className="m-2 bg-bg-primary border border-border rounded-lg shadow-2xl overflow-hidden flex flex-col"
                     style={{ maxHeight: 'calc(100% - 16px)' }}
                     onClick={(e) => e.stopPropagation()}
@@ -93,6 +102,7 @@ export function KeyboardShortcuts() {
                         <button
                             onClick={() => (isShortcutsHelpOpen.value = false)}
                             className="p-1 hover:bg-bg-tertiary rounded text-text-tertiary hover:text-text-primary"
+                            aria-label="Close shortcuts"
                         >
                             <CloseIcon size={12} />
                         </button>
@@ -143,6 +153,10 @@ export function KeyboardShortcuts() {
             onClick={() => (isShortcutsHelpOpen.value = false)}
         >
             <div
+                ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Keyboard shortcuts"
                 className="w-full max-w-xl bg-bg-primary border border-border rounded-xl shadow-2xl overflow-hidden animate-scale-in"
                 onClick={(e) => e.stopPropagation()}
             >
@@ -160,6 +174,7 @@ export function KeyboardShortcuts() {
                     <button
                         onClick={() => (isShortcutsHelpOpen.value = false)}
                         className="p-2 hover:bg-bg-tertiary rounded-lg transition-colors text-text-tertiary hover:text-text-primary"
+                        aria-label="Close shortcuts"
                     >
                         <CloseIcon size={18} />
                     </button>

@@ -40,7 +40,26 @@ impl Serialize for AppError {
 
 impl From<reqwest::Error> for AppError {
     fn from(err: reqwest::Error) -> Self {
+        if err.is_timeout() {
+            return AppError::Network("Request timed out".to_string());
+        }
+        if err.is_connect() {
+            return AppError::Network("Could not connect to the provider".to_string());
+        }
         AppError::Network(err.to_string())
+    }
+}
+
+impl AppError {
+    /// Map a provider HTTP status to a specific error variant so the UI can
+    /// react (rate-limit vs auth vs generic). `context` is a human label like
+    /// "OpenAI".
+    pub fn for_status(status: u16, context: &str, body: &str) -> AppError {
+        match status {
+            401 | 403 => AppError::InvalidApiKey,
+            429 => AppError::RateLimited,
+            _ => AppError::Api(format!("{} error {}: {}", context, status, body)),
+        }
     }
 }
 

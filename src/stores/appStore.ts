@@ -48,6 +48,7 @@ export interface ChatSession {
   createdAt: string;
   folderId?: string | null;
   activeBranchId?: string | null;
+  isPinned?: boolean;
 }
 
 export interface ChatFolder {
@@ -94,6 +95,45 @@ export const compareResponses = signal<{ model: string; content: string; isLoadi
 // Window State
 export const isMaximized = signal(false);
 export const isFullscreen = signal(false);
+
+// Connectivity — reflected in the header and used to short-circuit cloud sends
+// while offline (local Ollama still works). Updated by App.tsx online/offline
+// listeners.
+export const isOnline = signal(typeof navigator !== "undefined" ? navigator.onLine : true);
+
+// True while files are being dragged over the window (drives the drop overlay).
+export const isDragOver = signal(false);
+
+// Extensions accepted via drag-drop (mirrors the file-picker filters + backend
+// allow-list).
+const DROP_ALLOWED_EXT = [
+  "pdf", "txt", "md", "rst", "html", "htm", "py", "js", "ts", "tsx", "jsx", "rs",
+  "java", "cpp", "c", "h", "hpp", "go", "rb", "php", "swift", "kt", "cs", "json",
+  "yaml", "yml", "toml", "xml", "csv", "sh", "ps1", "sql", "log", "conf", "ini",
+  "env", "docx",
+];
+
+/// Add files dropped onto the window as documents. Filters to supported
+/// extensions and de-dupes by path. Returns how many were added.
+export function addDroppedFiles(paths: string[]): number {
+  let added = 0;
+  for (const filePath of paths) {
+    const name = filePath.split(/[/\\]/).pop() || "Unknown";
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    if (!DROP_ALLOWED_EXT.includes(ext)) continue;
+    if (documents.value.some(d => d.path === filePath)) continue;
+    addDocument({
+      id: crypto.randomUUID(),
+      name,
+      path: filePath,
+      size: 0,
+      type: ext,
+      addedAt: new Date().toISOString(),
+    });
+    added++;
+  }
+  return added;
+}
 
 // Keyboard Shortcuts Help
 export const isShortcutsHelpOpen = signal(false);
@@ -291,6 +331,35 @@ export function estimateTokens(text: string): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
 }
+
+// Approximate context-window sizes (tokens) so the UI can show usage as a
+// fraction of the active model's window rather than an absolute count. Matched
+// by substring against the model id; falls back to a conservative default.
+const CONTEXT_WINDOWS: { match: string; tokens: number }[] = [
+  { match: "gemini-3", tokens: 1_000_000 },
+  { match: "gemini-2.5", tokens: 1_000_000 },
+  { match: "gemini", tokens: 1_000_000 },
+  { match: "gpt-4o", tokens: 128_000 },
+  { match: "gpt-4-turbo", tokens: 128_000 },
+  { match: "gpt-4", tokens: 128_000 },
+  { match: "claude", tokens: 200_000 },
+  { match: "glm-4.6", tokens: 200_000 },
+  { match: "glm-4.7", tokens: 200_000 },
+  { match: "glm", tokens: 128_000 },
+];
+const DEFAULT_CONTEXT_WINDOW = 32_000;
+
+export function getContextWindow(model: string): number {
+  const m = model.toLowerCase();
+  const hit = CONTEXT_WINDOWS.find(c => m.includes(c.match));
+  return hit ? hit.tokens : DEFAULT_CONTEXT_WINDOW;
+}
+
+// Fraction (0-1) of the active model's context window used by the current chat.
+export const contextUsageFraction = computed(() => {
+  const used = currentMessages.value.reduce((sum, msg) => sum + (msg.tokenCount || 0), 0);
+  return used / getContextWindow(activeModel.value);
+});
 
 // Search chat history
 export function searchChatHistory(query: string): SearchResult[] {
@@ -610,8 +679,12 @@ export async function saveDocuments() {
 
 // Actions
 export function updateProviderApiKey(providerId: string, apiKey: string) {
+  // Changing the key invalidates any prior "verified" state — the new key
+  // hasn't been tested. Keep isConnected only when the key is unchanged.
   providers.value = providers.value.map((p) =>
-    p.id === providerId ? { ...p, apiKey } : p
+    p.id === providerId
+      ? { ...p, apiKey, isConnected: p.apiKey === apiKey ? p.isConnected : false }
+      : p
   );
   saveProviders();
 }
@@ -638,6 +711,70 @@ export function updateChatSession(sessionId: string, messages: ChatMessage[]) {
 export function deleteChatSession(sessionId: string) {
   chatHistory.value = chatHistory.value.filter(s => s.id !== sessionId);
   saveChatHistoryNow(); // Immediate for destructive action
+}
+
+/// Canonical "open this conversation" action. Restores the session's active
+/// branch (and its messages) so we never leave activeBranchId pointing at a
+/// previous session's branch. Every entry point — sidebar, folders, command
+/// palette, and the App.tsx keyboard shortcuts — routes through this so branch
+/// state can't drift out of sync.
+export function loadSession(session: ChatSession) {
+  const branchId = session.activeBranchId || null;
+  if (branchId && session.branchMessages && session.branchMessages[branchId]) {
+    currentMessages.value = session.branchMessages[branchId];
+  } else {
+    currentMessages.value = session.messages;
+  }
+  activeBranchId.value = branchId;
+  activeSessionId.value = session.id;
+}
+
+/// Load a session by its position in chatHistory (Ctrl+1-9 quick nav).
+export function loadSessionByIndex(index: number): boolean {
+  const session = chatHistory.value[index];
+  if (!session) return false;
+  loadSession(session);
+  return true;
+}
+
+/// Move to the previous (-1) or next (+1) session relative to the active one.
+export function loadAdjacentSession(direction: -1 | 1): boolean {
+  if (!activeSessionId.value) return false;
+  const i = chatHistory.value.findIndex(s => s.id === activeSessionId.value);
+  if (i === -1) return false;
+  const j = i + direction;
+  if (j < 0 || j >= chatHistory.value.length) return false;
+  loadSession(chatHistory.value[j]);
+  return true;
+}
+
+/// Start a fresh, unsaved chat. Clears the working conversation AND the active
+/// branch so the next send can't write into a stale branch.
+export function startNewChat() {
+  currentMessages.value = [];
+  activeSessionId.value = null;
+  activeBranchId.value = null;
+  currentQuery.value = "";
+}
+
+/// Rename a chat session. Titles are otherwise auto-derived from the first
+/// user message; this lets the user give a conversation a meaningful name.
+export function updateSessionTitle(sessionId: string, title: string) {
+  const trimmed = title.trim();
+  if (!trimmed) return;
+  chatHistory.value = chatHistory.value.map(s =>
+    s.id === sessionId ? { ...s, title: trimmed.slice(0, 120) } : s
+  );
+  saveChatHistoryNow();
+}
+
+/// Toggle a session's pinned state. Pinned sessions surface in their own group
+/// above the date groups in the sidebar.
+export function toggleSessionPinned(sessionId: string) {
+  chatHistory.value = chatHistory.value.map(s =>
+    s.id === sessionId ? { ...s, isPinned: !s.isPinned } : s
+  );
+  saveChatHistoryNow();
 }
 
 export function updateSessionFolder(sessionId: string, folderId: string | null) {
@@ -954,27 +1091,77 @@ export function exportAllSessions(): string {
 export function importSession(jsonString: string): ChatSession | null {
   try {
     const data = JSON.parse(jsonString);
-    if (data.id && data.title && Array.isArray(data.messages)) {
-      const session: ChatSession = {
-        id: crypto.randomUUID(), // Generate new ID to avoid conflicts
-        title: data.title,
-        messages: data.messages.map((m: any) => ({
-          id: crypto.randomUUID(),
-          role: m.role,
-          content: m.content,
-          tokenCount: estimateTokens(m.content),
-        })),
-        branches: [],
-        branchMessages: {},
-        createdAt: new Date().toISOString(),
-        folderId: null,
-      };
-      addChatSession(session);
-      return session;
-    }
-    return null;
+    if (!data || !data.title || !Array.isArray(data.messages)) return null;
+    // Preserve message + branch ids so branch lineage (fromMessageId,
+    // branchMessages keys) stays intact on round-trip. Only the session id is
+    // regenerated to avoid collisions with an existing session.
+    const session: ChatSession = {
+      id: crypto.randomUUID(),
+      title: String(data.title),
+      messages: data.messages.map((m: any) => ({
+        id: m.id || crypto.randomUUID(),
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: String(m.content ?? ""),
+        tokenCount: m.tokenCount ?? estimateTokens(String(m.content ?? "")),
+        parentId: m.parentId ?? null,
+        branchIndex: m.branchIndex,
+      })),
+      branches: Array.isArray(data.branches) ? data.branches : [],
+      branchMessages:
+        data.branchMessages && typeof data.branchMessages === "object" ? data.branchMessages : {},
+      createdAt: data.createdAt || new Date().toISOString(),
+      folderId: null,
+    };
+    addChatSession(session);
+    return session;
   } catch (e) {
     console.error("Failed to import session:", e);
+    return null;
+  }
+}
+
+/// Import the full backup envelope produced by exportAllSessions
+/// ({ version, sessions, folders }). Restores folders and every session,
+/// preserving ids (so folder assignments survive). Returns the number of
+/// sessions imported, or null if the JSON isn't a recognizable envelope.
+export function importAllSessions(jsonString: string): number | null {
+  try {
+    const data = JSON.parse(jsonString);
+    if (!data || !Array.isArray(data.sessions)) return null;
+
+    if (Array.isArray(data.folders)) {
+      const existingIds = new Set(chatFolders.value.map(f => f.id));
+      const incoming = data.folders.filter((f: any) => f && f.id && f.name && !existingIds.has(f.id));
+      if (incoming.length > 0) {
+        chatFolders.value = [...chatFolders.value, ...incoming];
+      }
+    }
+
+    const existingSessionIds = new Set(chatHistory.value.map(s => s.id));
+    let count = 0;
+    const restored: ChatSession[] = [];
+    for (const s of data.sessions) {
+      if (!s || !s.title || !Array.isArray(s.messages) || existingSessionIds.has(s.id)) continue;
+      restored.push({
+        id: s.id || crypto.randomUUID(),
+        title: String(s.title),
+        messages: s.messages,
+        branches: Array.isArray(s.branches) ? s.branches : [],
+        branchMessages: s.branchMessages && typeof s.branchMessages === "object" ? s.branchMessages : {},
+        createdAt: s.createdAt || new Date().toISOString(),
+        folderId: s.folderId ?? null,
+        isPinned: s.isPinned,
+      });
+      count++;
+    }
+    if (restored.length > 0) {
+      chatHistory.value = [...restored, ...chatHistory.value];
+    }
+    saveChatHistoryNow();
+    saveChatFolders();
+    return count;
+  } catch (e) {
+    console.error("Failed to import backup:", e);
     return null;
   }
 }

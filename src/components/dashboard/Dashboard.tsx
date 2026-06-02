@@ -1,12 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   viewMode,
-  activeModel,
-  activeProvider,
-  providers,
   isGenerating,
   currentQuery,
   isSettingsOpen,
@@ -16,22 +12,24 @@ import {
   activeBranchId,
   currentMessages,
   deleteChatSession,
+  addChatSession,
   addDocument,
   removeDocument,
-  ChatMessage,
   ChatSession,
   Document,
-  estimateTokens,
   branchFromMessage,
-  updateBranchMessages,
-  saveChatHistoryNow,
+  loadSession,
+  startNewChat,
+  updateSessionTitle,
+  toggleSessionPinned,
   searchResults,
   stopGeneration,
   isCommandPaletteOpen,
   isMaximized,
-  systemPrompt,
+  isOnline,
 } from "../../stores/appStore";
-import { useChatSubmit, parseApiError } from "../../hooks/useChatSubmit";
+import { useChatSubmit } from "../../hooks/useChatSubmit";
+import { toast } from "../../stores/toastStore";
 import { useDocumentLoader } from "../../hooks/useDocumentLoader";
 import { useDebouncedSearch } from "../../hooks/useDebouncedSearch";
 import { useAutoResize } from "../../hooks/useAutoResize";
@@ -54,6 +52,8 @@ import {
   DownloadIcon,
   CommandIcon,
   RegenerateIcon,
+  PinIcon,
+  EditIcon,
 } from "../icons";
 import { BranchSelector } from "../common/BranchSelector";
 import { Markdown } from "../common/Markdown";
@@ -75,21 +75,42 @@ export function Dashboard() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [showIndexPanel, setShowIndexPanel] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Whether the user is scrolled to (near) the bottom. Gates auto-scroll so
+  // streaming doesn't yank a user who has scrolled up to read history.
+  const isAtBottomRef = useRef(true);
 
   // Shared hooks - eliminates code duplication with Spotlight
   const { docsWithContent, loadingDocs, totalDocsLoaded } = useDocumentLoader();
   const { localSearchQuery, setLocalSearchQuery } = useDebouncedSearch(300);
-  const { handleSubmit, cleanupStream } = useChatSubmit(docsWithContent, setError);
-  const handleAutoResize = useAutoResize(200);
+  const { handleSubmit, regenerate, retryLast, cleanupStream } = useChatSubmit(docsWithContent, setError);
+  const { handleAutoResize, resize } = useAutoResize(200);
+
+  // Keep the textarea height in sync with programmatic value changes (quick
+  // prompts, post-submit clear, retry) — onInput alone misses those.
+  useEffect(() => {
+    resize(inputRef.current);
+  }, [currentQuery.value, resize]);
 
   // Clean up stream listener on unmount
   useEffect(() => cleanupStream, [cleanupStream]);
 
+  // Auto-scroll on new content only when the user is already at the bottom, so
+  // streaming doesn't interrupt reading scrolled-up history.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    if (isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    }
   }, [currentMessages.value]);
+
+  // Always jump to the bottom when switching into a different conversation.
+  useEffect(() => {
+    isAtBottomRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+  }, [activeSessionId.value]);
 
   // Group sessions by date once per chatHistory change instead of on every
   // render. This was previously rebuilt inside the JSX IIFE on every signal
@@ -108,7 +129,12 @@ export function Dashboard() {
       return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
     };
 
+    const pinned: typeof chatHistory.value = [];
     const grouped = chatHistory.value.reduce((acc, session) => {
+      if (session.isPinned) {
+        pinned.push(session);
+        return acc;
+      }
       const group = getDateGroup(session.createdAt);
       if (!acc[group]) acc[group] = [];
       acc[group].push(session);
@@ -125,7 +151,7 @@ export function Dashboard() {
       return 0;
     });
 
-    return { grouped, sortedGroups };
+    return { grouped, sortedGroups, pinned };
   }, [chatHistory.value]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -136,39 +162,30 @@ export function Dashboard() {
   };
 
   const handleNewChat = () => {
-    currentMessages.value = [];
-    activeSessionId.value = null;
-    activeBranchId.value = null; // Reset branch state for new chat
+    startNewChat();
     setError(null);
-    currentQuery.value = "";
     inputRef.current?.focus();
   };
 
   const handleLoadSession = (session: ChatSession) => {
-    // Restore the active branch state
-    const branchId = session.activeBranchId || null;
-    activeBranchId.value = branchId;
-
-    // Load messages from the active branch or main
-    if (branchId && session.branchMessages && session.branchMessages[branchId]) {
-      currentMessages.value = session.branchMessages[branchId];
-    } else {
-      currentMessages.value = session.messages;
-    }
-
-    activeSessionId.value = session.id;
+    loadSession(session);
     setError(null);
   };
 
   const handleDeleteSession = (sessionId: string) => {
     if (deleteConfirmId === sessionId) {
-      // Second click confirms deletion
+      // Second click confirms deletion. Capture the session first so the toast
+      // can offer Undo.
+      const deleted = chatHistory.value.find(s => s.id === sessionId);
       deleteChatSession(sessionId);
       if (activeSessionId.value === sessionId) {
         currentMessages.value = [];
         activeSessionId.value = null;
       }
       setDeleteConfirmId(null);
+      if (deleted) {
+        toast.action("Chat deleted", { label: "Undo", onClick: () => addChatSession(deleted) }, "info");
+      }
     } else {
       // First click shows confirmation
       setDeleteConfirmId(sessionId);
@@ -230,124 +247,151 @@ export function Dashboard() {
     branchFromMessage(activeSessionId.value, messageId);
   };
 
-  // Regenerate: Create a branch from the user message before this assistant response.
-  // Mirrors useChatSubmit's race-safe pattern (id-based message lookup,
-  // session/branch capture) so navigating away mid-regenerate doesn't
-  // corrupt some other thread.
-  const handleRegenerate = async (assistantMessageId: string) => {
-    if (!activeSessionId.value || isGenerating.value) return;
-
-    const msgIndex = currentMessages.value.findIndex(m => m.id === assistantMessageId);
-    if (msgIndex <= 0) return;
-
-    const userMessage = currentMessages.value[msgIndex - 1];
-    if (userMessage.role !== "user") return;
-
-    const branchId = branchFromMessage(activeSessionId.value, userMessage.id);
-    if (!branchId) return;
-
-    const provider = providers.value.find(p => p.id === activeProvider.value);
-    if (!provider?.apiKey && provider?.id !== "ollama") return;
-
-    isGenerating.value = true;
-
-    const newAssistantId = crypto.randomUUID();
-    const assistantMessage: ChatMessage = {
-      id: newAssistantId,
-      role: "assistant",
-      content: "",
-      tokenCount: 0,
-    };
-    currentMessages.value = [...currentMessages.value, assistantMessage];
-
-    const submitSessionId = activeSessionId.value;
-    const submitBranchId = activeBranchId.value;
-
-    try {
-      const history = currentMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-      const documentContext = docsWithContent
-        .filter(d => d.content && d.content.length > 0)
-        .map(d => ({ name: d.name, content: d.content! }));
-
-      let unlisten: UnlistenFn | null = null;
-      let fullResponse = "";
-      let throttleTimer: ReturnType<typeof setTimeout> | null = null;
-
-      const stillOnSameThread = () => (
-        activeSessionId.value === submitSessionId &&
-        activeBranchId.value === submitBranchId
-      );
-
-      const flushUpdate = () => {
-        throttleTimer = null;
-        if (!stillOnSameThread()) return;
-        const msgs = currentMessages.value;
-        const idx = msgs.findIndex(m => m.id === newAssistantId);
-        if (idx === -1) return;
-        const next = [...msgs];
-        next[idx] = { ...next[idx], content: fullResponse };
-        currentMessages.value = next;
-      };
-
-      unlisten = await listen<{ chunk: string; done: boolean }>("chat-stream", (event) => {
-        if (!event.payload.done) {
-          fullResponse += event.payload.chunk;
-          if (!throttleTimer) {
-            throttleTimer = setTimeout(flushUpdate, 80);
-          }
-        } else {
-          if (throttleTimer) { clearTimeout(throttleTimer); throttleTimer = null; }
-          if (unlisten) { unlisten(); unlisten = null; }
-
-          if (stillOnSameThread()) {
-            const msgs = currentMessages.value;
-            const idx = msgs.findIndex(m => m.id === newAssistantId);
-            if (idx !== -1) {
-              const next = [...msgs];
-              next[idx] = {
-                ...next[idx],
-                content: fullResponse,
-                tokenCount: estimateTokens(fullResponse),
-              };
-              currentMessages.value = next;
-            }
-          }
-
-          isGenerating.value = false;
-
-          if (fullResponse.trim().length > 0 && submitSessionId) {
-            updateBranchMessages(submitSessionId, submitBranchId, stillOnSameThread() ? currentMessages.value : []);
-            saveChatHistoryNow();
-          }
-        }
-      });
-
-      await invoke("send_message_stream", {
-        message: userMessage.content,
-        history: history.slice(0, -1),
-        documents: documentContext,
-        provider: activeProvider.value,
-        model: activeModel.value,
-        apiKey: provider?.apiKey || "",
-        systemPrompt: systemPrompt.value.trim() || null,
-      });
-    } catch (err: any) {
-      setError(parseApiError(err));
-      isGenerating.value = false;
-    }
+  const startRename = (session: ChatSession) => {
+    setRenamingId(session.id);
+    setRenameDraft(session.title);
   };
+
+  const commitRename = () => {
+    if (renamingId && renameDraft.trim()) {
+      updateSessionTitle(renamingId, renameDraft);
+    }
+    setRenamingId(null);
+    setRenameDraft("");
+  };
+
+  // Edit a sent user message and re-ask. Preserves the original turns as a
+  // branch (when in a saved session), then drops the user message back into the
+  // composer so the user can revise and resend from that point.
+  const handleEditMessage = (messageId: string) => {
+    if (isGenerating.value) return;
+    const idx = currentMessages.value.findIndex(m => m.id === messageId);
+    if (idx < 0) return;
+    const text = currentMessages.value[idx].content;
+
+    if (activeSessionId.value && idx > 0) {
+      // Branch from the message just before this one; the new branch ends right
+      // before the user message we're editing.
+      const branchId = branchFromMessage(activeSessionId.value, currentMessages.value[idx - 1].id);
+      if (branchId) {
+        currentMessages.value = currentMessages.value.slice(0, idx);
+      } else {
+        currentMessages.value = currentMessages.value.slice(0, idx);
+      }
+    } else {
+      // First message or unsaved chat: just truncate to before it.
+      currentMessages.value = currentMessages.value.slice(0, idx);
+    }
+    currentQuery.value = text;
+    setError(null);
+    inputRef.current?.focus();
+  };
+
+  const renderSessionRow = (session: ChatSession) => (
+    <div
+      key={session.id}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer?.setData("text/plain", session.id);
+        (e.target as HTMLElement).style.opacity = "0.5";
+      }}
+      onDragEnd={(e) => { (e.target as HTMLElement).style.opacity = "1"; }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open chat ${session.title}`}
+      className={`group flex items-center gap-1 px-2 py-2 rounded-lg cursor-grab transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent-primary ${activeSessionId.value === session.id
+        ? "bg-accent-primary/10 text-accent-primary"
+        : "hover:bg-bg-tertiary text-text-primary"
+        }`}
+      onClick={() => handleLoadSession(session)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleLoadSession(session); }
+      }}
+    >
+      {renamingId === session.id ? (
+        <input
+          value={renameDraft}
+          onInput={(e) => setRenameDraft((e.target as HTMLInputElement).value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") commitRename();
+            if (e.key === "Escape") { setRenamingId(null); setRenameDraft(""); }
+          }}
+          onBlur={commitRename}
+          onClick={(e) => e.stopPropagation()}
+          autoFocus
+          aria-label="Rename chat"
+          className="flex-1 min-w-0 bg-bg-primary border border-accent-primary rounded px-1 py-0.5 text-sm text-text-primary outline-none"
+        />
+      ) : (
+        <span
+          className="text-sm truncate flex-1"
+          onDblClick={(e) => { e.stopPropagation(); startRename(session); }}
+        >
+          {session.title}
+        </span>
+      )}
+
+      {session.branches.length > 0 && renamingId !== session.id && (
+        <span className="flex items-center gap-0.5 text-[10px] text-text-tertiary bg-bg-tertiary px-1.5 py-0.5 rounded-full flex-shrink-0">
+          <BranchIcon size={8} />
+          {session.branches.length + 1}
+        </span>
+      )}
+
+      {renamingId !== session.id && (
+        <div className="flex items-center flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleSessionPinned(session.id); }}
+            className={`p-1 rounded min-w-[24px] min-h-[24px] flex items-center justify-center transition-all ${session.isPinned
+              ? "opacity-100 text-accent-primary"
+              : "opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-text-primary"
+              }`}
+            aria-label={session.isPinned ? "Unpin chat" : "Pin chat"}
+            aria-pressed={!!session.isPinned}
+            title={session.isPinned ? "Unpin" : "Pin"}
+          >
+            <PinIcon size={12} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); startRename(session); }}
+            className="p-1 rounded min-w-[24px] min-h-[24px] flex items-center justify-center opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-text-primary transition-all"
+            aria-label="Rename chat"
+            title="Rename"
+          >
+            <EditIcon size={12} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDeleteSession(session.id); }}
+            className={`p-1 rounded min-w-[24px] min-h-[24px] flex items-center justify-center transition-all ${deleteConfirmId === session.id
+              ? "opacity-100 bg-error/20 text-error"
+              : "opacity-0 group-hover:opacity-100 hover:bg-error/20 hover:text-error"
+              }`}
+            aria-label={deleteConfirmId === session.id ? "Click again to confirm delete" : "Delete chat"}
+            title={deleteConfirmId === session.id ? "Click to confirm" : "Delete"}
+          >
+            {deleteConfirmId === session.id ? (
+              <span className="text-[10px] font-medium">?</span>
+            ) : (
+              <CloseIcon size={12} />
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   const currentSession = chatHistory.value.find(s => s.id === activeSessionId.value);
 
   return (
     <div className="h-full w-full flex bg-bg-primary">
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? "w-72" : "w-0"} transition-all duration-200 overflow-hidden border-r border-border bg-bg-secondary flex flex-col`}>
+      <div className={`${sidebarOpen ? "w-72" : "w-0"} transition-[width] duration-200 ease-out overflow-hidden border-r border-border bg-bg-secondary flex flex-col`}>
         {/* Sidebar Header */}
         <div className="p-3 border-b border-border space-y-2">
           <button
             onClick={handleNewChat}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-accent-primary text-white text-sm hover:bg-accent-primary/90 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-accent-primary text-on-accent text-sm hover:bg-accent-primary/90 transition-colors"
             title="New Chat (Ctrl+N)"
           >
             <PlusIcon size={16} />
@@ -437,56 +481,28 @@ export function Dashboard() {
                         <div className="text-xs text-text-tertiary">No conversations yet</div>
                         <div className="text-[10px] text-text-tertiary">Start chatting to see your history here</div>
                       </div>
-                    ) : groupedSessions.sortedGroups.map(group => (
-                      <div key={group}>
-                        <div className="text-xs text-text-tertiary px-2 py-1 uppercase tracking-wide">{group}</div>
-                        <div className="space-y-0.5">
-                          {groupedSessions.grouped[group].map(session => (
-                            <div
-                              key={session.id}
-                              draggable
-                              onDragStart={(e) => {
-                                e.dataTransfer?.setData("text/plain", session.id);
-                                (e.target as HTMLElement).style.opacity = "0.5";
-                              }}
-                              onDragEnd={(e) => {
-                                (e.target as HTMLElement).style.opacity = "1";
-                              }}
-                              className={`group flex items-center justify-between px-2 py-2 rounded-lg cursor-grab transition-colors ${activeSessionId.value === session.id
-                                ? "bg-accent-primary/10 text-accent-primary"
-                                : "hover:bg-bg-tertiary text-text-primary"
-                                }`}
-                              onClick={() => handleLoadSession(session)}
-                            >
-                              <span className="text-sm truncate flex-1">{session.title}</span>
-                              {/* Branch count badge */}
-                              {session.branches.length > 0 && (
-                                <span className="flex items-center gap-0.5 text-[10px] text-text-tertiary bg-bg-tertiary px-1.5 py-0.5 rounded-full">
-                                  <BranchIcon size={8} />
-                                  {session.branches.length + 1}
-                                </span>
-                              )}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleDeleteSession(session.id); }}
-                                className={`p-1 rounded transition-all min-w-[24px] min-h-[24px] flex items-center justify-center ${
-                                  deleteConfirmId === session.id
-                                    ? "opacity-100 bg-error/20 text-error"
-                                    : "opacity-0 group-hover:opacity-100 hover:bg-error/20 hover:text-error"
-                                }`}
-                                aria-label={deleteConfirmId === session.id ? "Click again to confirm delete" : "Delete chat"}
-                                title={deleteConfirmId === session.id ? "Click to confirm" : "Delete"}
-                              >
-                                {deleteConfirmId === session.id ? (
-                                  <span className="text-[10px] font-medium">?</span>
-                                ) : (
-                                  <CloseIcon size={12} />
-                                )}
-                              </button>
+                    ) : (
+                      <>
+                        {groupedSessions.pinned.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-1 text-xs text-text-tertiary px-2 py-1 uppercase tracking-wide">
+                              <PinIcon size={10} /> Pinned
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                            <div className="space-y-0.5">
+                              {groupedSessions.pinned.map(renderSessionRow)}
+                            </div>
+                          </div>
+                        )}
+                        {groupedSessions.sortedGroups.map(group => (
+                          <div key={group}>
+                            <div className="text-xs text-text-tertiary px-2 py-1 uppercase tracking-wide">{group}</div>
+                            <div className="space-y-0.5">
+                              {groupedSessions.grouped[group].map(renderSessionRow)}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                  )}
                   </div>
               )}
             </>
@@ -613,6 +629,15 @@ export function Dashboard() {
                 <span className="text-xs text-accent-primary">{totalDocsLoaded} doc{totalDocsLoaded > 1 ? 's' : ''}</span>
               </button>
             )}
+
+            {!isOnline.value && (
+              <span
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-warning/15 text-warning text-xs font-medium"
+                title="No internet connection — only local Ollama models will work"
+              >
+                Offline
+              </span>
+            )}
           </div>
 
           {/* Drag Area - invisible but draggable */}
@@ -674,6 +699,7 @@ export function Dashboard() {
           onScroll={(e) => {
             const el = e.target as HTMLDivElement;
             const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+            isAtBottomRef.current = atBottom;
             setShowScrollBottom(!atBottom && currentMessages.value.length > 3);
           }}
         >
@@ -732,7 +758,7 @@ export function Dashboard() {
                   {totalDocsLoaded === 0 && (
                     <button
                       onClick={handleAddDocuments}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-white hover:bg-accent-primary/90 transition-colors text-sm font-medium shadow-lg shadow-accent-primary/20"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-on-accent hover:bg-accent-primary/90 transition-colors text-sm font-medium shadow-lg shadow-accent-primary/20"
                     >
                       <FolderIcon size={16} />
                       Add Documents
@@ -771,7 +797,11 @@ export function Dashboard() {
                 );
               })()}
 
-              {currentMessages.value.map((message, index) => (
+              {currentMessages.value.map((message, index) => {
+                // Skip the empty assistant placeholder while streaming — the
+                // typing indicator stands in for it until the first chunk.
+                if (message.role === "assistant" && !message.content) return null;
+                return (
                 <div
                   key={message.id}
                   className={`group flex ${message.role === "user" ? "justify-end" : "justify-start"} animate-message-reveal`}
@@ -779,7 +809,7 @@ export function Dashboard() {
                 >
                   <div
                     className={`max-w-[80%] rounded-xl px-4 py-3 relative ${message.role === "user"
-                      ? "bg-accent-primary text-white"
+                      ? "bg-accent-primary text-on-accent"
                       : "bg-bg-secondary text-text-primary border border-border"
                       }`}
                   >
@@ -811,7 +841,7 @@ export function Dashboard() {
                       <button
                         onClick={() => handleCopyMessage(message.content, message.id)}
                         className={`p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs ${message.role === "user"
-                          ? "text-white/70 hover:text-white hover:bg-white/10"
+                          ? "text-on-accent opacity-70 hover:opacity-100 hover:bg-black/10"
                           : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
                           }`}
                         title={copiedMessageId === message.id ? "Copied!" : "Copy message"}
@@ -820,10 +850,22 @@ export function Dashboard() {
                         {copiedMessageId === message.id ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
                       </button>
 
+                      {/* Edit & resend - user messages only */}
+                      {message.role === "user" && !isGenerating.value && (
+                        <button
+                          onClick={() => handleEditMessage(message.id)}
+                          className="p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs text-on-accent opacity-70 hover:opacity-100 hover:bg-black/10"
+                          title="Edit & resend"
+                          aria-label="Edit and resend message"
+                        >
+                          <EditIcon size={12} />
+                        </button>
+                      )}
+
                       {/* Regenerate button - only on latest assistant message */}
                       {message.role === "assistant" && index === currentMessages.value.length - 1 && !isGenerating.value && (
                         <button
-                          onClick={() => handleRegenerate(message.id)}
+                          onClick={() => regenerate(message.id)}
                           className="p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
                           title="Regenerate response (creates a new branch)"
                           aria-label="Regenerate response"
@@ -845,7 +887,7 @@ export function Dashboard() {
                       )}
 
                       {message.tokenCount && message.tokenCount > 10 && (
-                        <span className={`text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity ${message.role === "user" ? "text-white/50" : "text-text-tertiary/60"
+                        <span className={`text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity ${message.role === "user" ? "text-on-accent" : "text-text-tertiary/60"
                           }`}>
                           ~{message.tokenCount} tokens
                         </span>
@@ -853,9 +895,10 @@ export function Dashboard() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
 
-              {isGenerating.value && (
+              {isGenerating.value && !currentMessages.value[currentMessages.value.length - 1]?.content && (
                 <div className="flex justify-start">
                   <div className="bg-bg-secondary text-text-primary border border-border rounded-xl px-4 py-3">
                     <TypingIndicator className="text-accent-primary" />
@@ -870,7 +913,7 @@ export function Dashboard() {
           {/* Scroll to Bottom Button */}
           {showScrollBottom && (
             <button
-              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+              onClick={() => { isAtBottomRef.current = true; messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }}
               className="absolute bottom-4 right-6 p-2 rounded-full bg-bg-secondary border border-border shadow-lg hover:bg-bg-tertiary transition-colors z-10"
               aria-label="Scroll to bottom"
               title="Scroll to bottom"
@@ -885,12 +928,20 @@ export function Dashboard() {
           <div className="px-4 py-2 bg-error/10 border-t border-error/20 flex items-center justify-between gap-3" role="alert">
             <p className="text-sm text-error flex-1">{error}</p>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {/Settings|API key/i.test(error) && (
+              {/Settings|API key/i.test(error) ? (
                 <button
                   onClick={() => (isSettingsOpen.value = true)}
                   className="px-2.5 py-1 rounded text-xs bg-error/20 text-error hover:bg-error/30 transition-colors"
                 >
                   Open Settings
+                </button>
+              ) : (
+                <button
+                  onClick={() => retryLast()}
+                  disabled={isGenerating.value}
+                  className="px-2.5 py-1 rounded text-xs bg-error/20 text-error hover:bg-error/30 transition-colors disabled:opacity-50"
+                >
+                  Try again
                 </button>
               )}
               <button
@@ -938,7 +989,7 @@ export function Dashboard() {
                   onClick={handleSubmit}
                   disabled={!currentQuery.value.trim()}
                   className={`p-2 rounded-lg transition-all flex-shrink-0 ${currentQuery.value.trim()
-                    ? "bg-accent-primary text-white hover:bg-accent-primary/90"
+                    ? "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                     : "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
                     }`}
                   title={currentQuery.value.trim() ? "Send (Enter)" : "Type a message to send"}

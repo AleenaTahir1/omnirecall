@@ -1,7 +1,9 @@
-import { useState } from "preact/hooks";
+import { useState, useRef } from "preact/hooks";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
     exportSession,
     importSession,
+    importAllSessions,
     chatHistory,
     ChatSession,
 } from "../../stores/appStore";
@@ -27,6 +29,23 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
     const [exportContent, setExportContent] = useState("");
     const [copied, setCopied] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState<string | null>(null); // null = main
+    const panelRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    useFocusTrap(panelRef, true, onClose);
+
+    const handleFile = async (e: Event) => {
+        const input = e.target as HTMLInputElement;
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+            const text = await file.text();
+            setImportText(text);
+            setImportResult(null);
+        } catch {
+            setImportResult("error");
+        }
+        input.value = "";
+    };
 
     // Get branches for current session
     const getBranches = () => {
@@ -70,21 +89,35 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
     };
 
     const handleImport = () => {
+        // Try the full-backup envelope first (version/sessions/folders), then
+        // fall back to a single-session import.
+        const bulk = importAllSessions(importText);
+        if (bulk !== null) {
+            setImportResult("success");
+            setImportText("");
+            setTimeout(() => { onClose?.(); }, 1500);
+            return;
+        }
         const result = importSession(importText);
         if (result) {
             setImportResult("success");
             setImportText("");
-            setTimeout(() => {
-                onClose?.();
-            }, 1500);
+            setTimeout(() => { onClose?.(); }, 1500);
         } else {
             setImportResult("error");
         }
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="w-full max-w-lg bg-bg-primary border border-border rounded-xl shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+            <div
+                ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Export or import chat"
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-lg bg-bg-primary border border-border rounded-xl shadow-2xl overflow-hidden"
+            >
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                     <div className="flex items-center gap-3">
@@ -92,7 +125,7 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                             <button
                                 onClick={() => setMode("export")}
                                 className={`px-3 py-1.5 text-sm flex items-center gap-1.5 ${mode === "export"
-                                    ? "bg-accent-primary text-white"
+                                    ? "bg-accent-primary text-on-accent"
                                     : "bg-bg-secondary text-text-secondary hover:bg-bg-tertiary"
                                     }`}
                             >
@@ -102,7 +135,7 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                             <button
                                 onClick={() => setMode("import")}
                                 className={`px-3 py-1.5 text-sm flex items-center gap-1.5 ${mode === "import"
-                                    ? "bg-accent-primary text-white"
+                                    ? "bg-accent-primary text-on-accent"
                                     : "bg-bg-secondary text-text-secondary hover:bg-bg-tertiary"
                                     }`}
                             >
@@ -114,6 +147,7 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                     <button
                         onClick={onClose}
                         className="p-1.5 hover:bg-bg-tertiary rounded text-text-tertiary hover:text-text-primary"
+                        aria-label="Close export dialog"
                     >
                         <CloseIcon size={16} />
                     </button>
@@ -194,7 +228,7 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                             {session && !exportContent && (
                                 <button
                                     onClick={handleExport}
-                                    className="w-full px-4 py-2 bg-accent-primary text-white rounded-lg hover:bg-accent-primary/90 text-sm font-medium"
+                                    className="w-full px-4 py-2 bg-accent-primary text-on-accent rounded-lg hover:bg-accent-primary/90 text-sm font-medium"
                                 >
                                     Generate Export
                                 </button>
@@ -214,7 +248,7 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                                             </button>
                                             <button
                                                 onClick={handleDownload}
-                                                className="px-3 py-1.5 text-xs bg-accent-primary text-white rounded hover:bg-accent-primary/90"
+                                                className="px-3 py-1.5 text-xs bg-accent-primary text-on-accent rounded hover:bg-accent-primary/90"
                                             >
                                                 Download
                                             </button>
@@ -230,9 +264,26 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                     ) : (
                         <div className="space-y-4">
                             <div>
-                                <label className="text-sm text-text-secondary mb-2 block">
-                                    Paste JSON export
-                                </label>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="text-sm text-text-secondary">
+                                        Paste JSON, or import a file
+                                    </label>
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-bg-secondary border border-border rounded hover:bg-bg-tertiary text-text-secondary"
+                                    >
+                                        <UploadIcon size={12} />
+                                        Choose file…
+                                    </button>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".json,application/json"
+                                        onChange={handleFile}
+                                        className="hidden"
+                                        aria-hidden="true"
+                                    />
+                                </div>
                                 <textarea
                                     value={importText}
                                     onInput={(e) => {
@@ -262,7 +313,7 @@ export function ExportImport({ session, onClose }: ExportImportProps) {
                                 onClick={handleImport}
                                 disabled={!importText.trim()}
                                 className={`w-full px-4 py-2 rounded-lg text-sm font-medium ${importText.trim()
-                                    ? "bg-accent-primary text-white hover:bg-accent-primary/90"
+                                    ? "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                                     : "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
                                     }`}
                             >

@@ -11,6 +11,7 @@ import {
   addDocument,
   Document,
   stopGeneration,
+  startNewChat,
   isCommandPaletteOpen,
 } from "../../stores/appStore";
 import { useChatSubmit } from "../../hooks/useChatSubmit";
@@ -43,8 +44,13 @@ export function Spotlight() {
 
   // Shared hooks - eliminates code duplication with Dashboard
   const { docsWithContent, totalDocsLoaded } = useDocumentLoader();
-  const { handleSubmit, cleanupStream } = useChatSubmit(docsWithContent, setError);
-  const handleAutoResize = useAutoResize(60);
+  const { handleSubmit, regenerate, cleanupStream } = useChatSubmit(docsWithContent, setError);
+  const { handleAutoResize, resize } = useAutoResize(60);
+
+  // Keep textarea height correct on programmatic value changes too.
+  useEffect(() => {
+    resize(inputRef.current);
+  }, [currentQuery.value, resize]);
 
   // Clean up stream listener on unmount
   useEffect(() => cleanupStream, [cleanupStream]);
@@ -83,9 +89,9 @@ export function Spotlight() {
   };
 
   const handleClear = () => {
-    currentQuery.value = "";
-    currentMessages.value = [];
-    activeSessionId.value = null;
+    // startNewChat also resets the active branch (handleClear used to leave it
+    // stale, which could write into a non-existent branch on the next send).
+    startNewChat();
     setError(null);
     inputRef.current?.focus();
   };
@@ -193,7 +199,15 @@ export function Spotlight() {
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          className="flex-1 overflow-y-auto"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-atomic="false"
+          aria-busy={isGenerating.value}
+          aria-label="Conversation"
+        >
           {currentMessages.value.length === 0 && !isGenerating.value && !error ? (
             <div className="h-full flex items-center justify-center p-4">
               <div className="text-center max-w-xs">
@@ -210,6 +224,19 @@ export function Spotlight() {
                     ? "Ask questions about your documents"
                     : "Chat, analyze, or add documents for RAG"}
                 </p>
+                {totalDocsLoaded === 0 && (
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 mb-3">
+                    {["Summarize this", "Explain simply", "Brainstorm ideas"].map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => { currentQuery.value = q; inputRef.current?.focus(); }}
+                        className="px-2 py-1 rounded-md border border-border text-[11px] text-text-secondary hover:bg-bg-tertiary hover:text-text-primary transition-colors"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-text-tertiary">
                   <span><kbd className="px-1 py-0.5 bg-bg-tertiary rounded border border-border">Enter</kbd> send</span>
                   <span><kbd className="px-1 py-0.5 bg-bg-tertiary rounded border border-border">Ctrl+K</kbd> commands</span>
@@ -219,14 +246,16 @@ export function Spotlight() {
             </div>
           ) : (
             <div className="p-3 space-y-3">
-              {currentMessages.value.map((msg, index) => (
+              {currentMessages.value.map((msg, index) => {
+                if (msg.role === "assistant" && !msg.content) return null;
+                return (
                 <div
                   key={msg.id}
                   className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-message-reveal`}
                   style={{ animationDelay: `${Math.min(index * 50, 200)}ms` }}
                 >
                   <div className={`max-w-[90%] rounded-lg px-3 py-2 text-xs relative ${msg.role === "user"
-                    ? "bg-accent-primary text-white"
+                    ? "bg-accent-primary text-on-accent"
                     : "bg-bg-tertiary text-text-primary"
                     }`}>
                     {msg.role === "user" ? (
@@ -242,15 +271,25 @@ export function Spotlight() {
                         <button
                           onClick={() => handleCopyMessage(msg.content, msg.id)}
                           className={`p-0.5 rounded ${msg.role === "user"
-                            ? "text-white/70 hover:text-white"
+                            ? "text-on-accent opacity-70 hover:opacity-100"
                             : "text-text-tertiary hover:text-text-primary"
                             }`}
                           title="Copy"
                         >
                           {copiedMessageId === msg.id ? <CheckIcon size={10} /> : <CopyIcon size={10} />}
                         </button>
+                        {msg.role === "assistant" && index === currentMessages.value.length - 1 && !isGenerating.value && activeSessionId.value && (
+                          <button
+                            onClick={() => regenerate(msg.id)}
+                            className="p-0.5 rounded text-text-tertiary hover:text-text-primary"
+                            title="Regenerate response"
+                            aria-label="Regenerate response"
+                          >
+                            <RefreshIcon size={10} />
+                          </button>
+                        )}
                         {msg.tokenCount && msg.tokenCount > 10 && (
-                          <span className={`text-[10px] ${msg.role === "user" ? "text-white/50" : "text-text-tertiary/60"
+                          <span className={`text-[10px] ${msg.role === "user" ? "text-on-accent opacity-60" : "text-text-tertiary/60"
                             }`}>
                             ~{msg.tokenCount}
                           </span>
@@ -259,8 +298,9 @@ export function Spotlight() {
                     )}
                   </div>
                 </div>
-              ))}
-              {isGenerating.value && (
+                );
+              })}
+              {isGenerating.value && !currentMessages.value[currentMessages.value.length - 1]?.content && (
                 <div className="flex justify-start">
                   <div className="bg-bg-tertiary rounded-lg px-3 py-2.5">
                     <TypingIndicator className="text-accent-primary" />
@@ -328,7 +368,7 @@ export function Spotlight() {
                 onClick={handleSubmit}
                 disabled={!currentQuery.value.trim()}
                 className={`p-2 rounded-lg transition-all flex-shrink-0 ${currentQuery.value.trim()
-                  ? "bg-accent-primary text-white hover:bg-accent-primary/90"
+                  ? "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                   : "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
                   }`}
                 title={currentQuery.value.trim() ? "Send (Enter)" : "Type a message to send"}

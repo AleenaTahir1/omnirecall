@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useState, useRef, useEffect } from "preact/hooks";
 import {
   activeModel,
   activeProvider,
@@ -28,6 +28,7 @@ interface ModelSelectorProps {
 export function ModelSelector({ compact = false }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false), open);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const currentProvider = providers.value.find(p => p.id === activeProvider.value);
   const currentProviderLabel = currentProvider?.name.replace(" (Local)", "") ?? activeProvider.value;
@@ -37,8 +38,20 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
     setOpen(false);
   };
 
+  // Scroll the active model into view when the dropdown opens.
+  useEffect(() => {
+    if (open) {
+      const el = listRef.current?.querySelector('[aria-selected="true"]') as HTMLElement | null;
+      el?.scrollIntoView({ block: "nearest" });
+    }
+  }, [open]);
+
   return (
-    <div className="relative" ref={ref}>
+    <div
+      className="relative"
+      ref={ref}
+      onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+    >
       <button
         onClick={() => setOpen(o => !o)}
         aria-haspopup="listbox"
@@ -70,6 +83,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
 
       {open && (
         <div
+          ref={listRef}
           role="listbox"
           aria-label="Available AI models"
           className={`absolute top-full left-0 mt-1 bg-bg-primary border border-border rounded-lg shadow-xl z-50 py-1 overflow-y-auto ${

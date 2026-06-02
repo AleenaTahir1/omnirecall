@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
     isCommandPaletteOpen,
     commandPaletteQuery,
     searchChatHistory,
     searchResults,
     chatHistory,
-    currentMessages,
-    activeSessionId,
+    loadSession,
+    startNewChat,
     viewMode,
     isSettingsOpen,
     isCompareMode,
@@ -35,8 +36,18 @@ interface Command {
 
 export function CommandPalette() {
     const inputRef = useRef<HTMLInputElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const resultsRef = useRef<HTMLDivElement>(null);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [mode, setMode] = useState<"commands" | "search">("commands");
+    // Trap + restore focus (Escape is handled by the component's own keydown).
+    useFocusTrap(panelRef, isCommandPaletteOpen.value);
+
+    // Keep the keyboard-selected row scrolled into view.
+    useEffect(() => {
+        const el = resultsRef.current?.querySelector(`[data-cmd-index="${selectedIndex}"]`) as HTMLElement | null;
+        el?.scrollIntoView({ block: "nearest" });
+    }, [selectedIndex]);
 
     const commands: Command[] = [
         {
@@ -47,8 +58,7 @@ export function CommandPalette() {
             category: "action",
             keywords: ["create", "start", "conversation"],
             action: () => {
-                currentMessages.value = [];
-                activeSessionId.value = null;
+                startNewChat();
                 isCommandPaletteOpen.value = false;
             },
         },
@@ -116,8 +126,7 @@ export function CommandPalette() {
         icon: <MessageIcon size={16} />,
         category: "navigation" as const,
         action: () => {
-            currentMessages.value = session.messages;
-            activeSessionId.value = session.id;
+            loadSession(session);
             isCommandPaletteOpen.value = false;
         },
     }));
@@ -189,8 +198,7 @@ export function CommandPalette() {
                     const result = searchResults.value[selectedIndex];
                     const session = chatHistory.value.find(s => s.id === result.sessionId);
                     if (session) {
-                        currentMessages.value = session.messages;
-                        activeSessionId.value = session.id;
+                        loadSession(session);
                         isCommandPaletteOpen.value = false;
                     }
                 }
@@ -220,6 +228,7 @@ export function CommandPalette() {
             aria-label="Command Palette"
         >
             <div
+                ref={panelRef}
                 className="w-full max-w-xl bg-bg-primary border border-border rounded-xl shadow-2xl overflow-hidden animate-scale-in"
                 onClick={(e) => e.stopPropagation()}
             >
@@ -248,13 +257,14 @@ export function CommandPalette() {
                     <button
                         onClick={() => (isCommandPaletteOpen.value = false)}
                         className="p-1 rounded hover:bg-bg-tertiary text-text-tertiary hover:text-text-primary"
+                        aria-label="Close command palette"
                     >
                         <CloseIcon size={14} />
                     </button>
                 </div>
 
                 {/* Results */}
-                <div className="max-h-80 overflow-y-auto">
+                <div ref={resultsRef} className="max-h-80 overflow-y-auto">
                     {mode === "commands" ? (
                         <>
                             {/* Commands Section */}
@@ -264,6 +274,7 @@ export function CommandPalette() {
                                     {filteredCommands.map((cmd, idx) => (
                                         <button
                                             key={cmd.id}
+                                            data-cmd-index={idx}
                                             onClick={() => cmd.action()}
                                             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${selectedIndex === idx
                                                     ? "bg-accent-primary/10 text-accent-primary"
@@ -290,6 +301,7 @@ export function CommandPalette() {
                                     {filteredRecentChats.map((chat, idx) => (
                                         <button
                                             key={chat.id}
+                                            data-cmd-index={filteredCommands.length + idx}
                                             onClick={() => chat.action()}
                                             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${selectedIndex === filteredCommands.length + idx
                                                     ? "bg-accent-primary/10 text-accent-primary"
@@ -323,11 +335,11 @@ export function CommandPalette() {
                                     {searchResults.value.map((result, idx) => (
                                         <button
                                             key={`${result.sessionId}-${result.messageId}`}
+                                            data-cmd-index={idx}
                                             onClick={() => {
                                                 const session = chatHistory.value.find(s => s.id === result.sessionId);
                                                 if (session) {
-                                                    currentMessages.value = session.messages;
-                                                    activeSessionId.value = session.id;
+                                                    loadSession(session);
                                                     isCommandPaletteOpen.value = false;
                                                 }
                                             }}

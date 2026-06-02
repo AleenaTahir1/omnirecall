@@ -1,9 +1,10 @@
-import { useState } from "preact/hooks";
+import { useState, useRef } from "preact/hooks";
 import {
     isOnboardingActive,
     hasCompletedOnboarding,
     isSettingsOpen,
 } from "../../stores/appStore";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { LogoIcon, ChevronDownIcon, CommandIcon } from "../icons";
 import { toast } from "../../stores/toastStore";
 
@@ -32,7 +33,10 @@ const steps: OnboardingStep[] = [
                 <span className="text-2xl">🔑</span>
             </div>
         ),
-        action: () => { isSettingsOpen.value = true; isOnboardingActive.value = false; },
+        // Open Settings but keep the tour active so the user returns to it
+        // after adding a key (previously this dismissed onboarding without
+        // persisting completion, so the tour re-appeared every launch).
+        action: () => { isSettingsOpen.value = true; },
         actionLabel: "Open Settings",
     },
     {
@@ -69,6 +73,8 @@ const steps: OnboardingStep[] = [
 
 export function Onboarding() {
     const [currentStep, setCurrentStep] = useState(0);
+    const panelRef = useRef<HTMLDivElement>(null);
+    useFocusTrap(panelRef, isOnboardingActive.value, () => completeOnboarding());
 
     if (!isOnboardingActive.value) return null;
 
@@ -83,11 +89,15 @@ export function Onboarding() {
         }
     };
 
+    const handleBack = () => {
+        if (currentStep > 0) setCurrentStep(currentStep - 1);
+    };
+
     const handleSkip = () => {
         completeOnboarding();
     };
 
-    const completeOnboarding = () => {
+    function completeOnboarding() {
         hasCompletedOnboarding.value = true;
         isOnboardingActive.value = false;
         toast.success("Welcome! Start by typing a message below.");
@@ -98,7 +108,13 @@ export function Onboarding() {
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center animate-fade-in">
-            <div className="w-full max-w-md bg-bg-primary border border-border rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+            <div
+                ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Getting started"
+                className="w-full max-w-md bg-bg-primary border border-border rounded-2xl shadow-2xl overflow-hidden animate-scale-in"
+            >
                 {/* Progress dots */}
                 <div className="flex items-center justify-center gap-2 pt-6">
                     {steps.map((_, idx) => (
@@ -123,31 +139,42 @@ export function Onboarding() {
 
                 {/* Actions */}
                 <div className="px-8 pb-8 space-y-3">
-                    {step.action ? (
+                    {step.action && (
                         <button
                             onClick={step.action}
-                            className="w-full py-3 px-4 rounded-xl bg-accent-primary text-white font-medium hover:bg-accent-primary/90 transition-colors"
+                            className="w-full py-3 px-4 rounded-xl border border-border text-text-primary font-medium hover:bg-bg-tertiary transition-colors"
                         >
                             {step.actionLabel}
                         </button>
-                    ) : (
-                        <button
-                            onClick={handleNext}
-                            className="w-full py-3 px-4 rounded-xl bg-accent-primary text-white font-medium hover:bg-accent-primary/90 transition-colors flex items-center justify-center gap-2"
-                        >
-                            {isLastStep ? "Get Started" : "Continue"}
-                            {!isLastStep && <ChevronDownIcon size={16} className="rotate-[-90deg]" />}
-                        </button>
                     )}
+                    <button
+                        onClick={handleNext}
+                        className="w-full py-3 px-4 rounded-xl bg-accent-primary text-on-accent font-medium hover:bg-accent-primary/90 transition-colors flex items-center justify-center gap-2"
+                    >
+                        {isLastStep ? "Get Started" : "Continue"}
+                        {!isLastStep && <ChevronDownIcon size={16} className="rotate-[-90deg]" />}
+                    </button>
 
-                    {!isLastStep && (
-                        <button
-                            onClick={handleSkip}
-                            className="w-full py-2 text-sm text-text-tertiary hover:text-text-primary transition-colors"
-                        >
-                            Skip intro
-                        </button>
-                    )}
+                    <div className="flex items-center justify-between pt-1">
+                        {currentStep > 0 ? (
+                            <button
+                                onClick={handleBack}
+                                className="text-sm text-text-tertiary hover:text-text-primary transition-colors"
+                            >
+                                Back
+                            </button>
+                        ) : (
+                            <span />
+                        )}
+                        {!isLastStep && (
+                            <button
+                                onClick={handleSkip}
+                                className="text-sm text-text-tertiary hover:text-text-primary transition-colors"
+                            >
+                                Skip intro
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Feature highlights for "complete" step */}

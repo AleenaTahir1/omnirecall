@@ -39,7 +39,13 @@ impl VectorStore {
         
         let conn = Connection::open(&db_path)
             .map_err(|e| AppError::Database(format!("Failed to open database: {}", e)))?;
-        
+
+        // WAL allows concurrent readers while a writer is active and survives
+        // the fresh-connection-per-command pattern; busy_timeout avoids
+        // "database is locked" errors when indexing and searching overlap.
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "busy_timeout", 5000);
+
         // Initialize schema
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS chunks (

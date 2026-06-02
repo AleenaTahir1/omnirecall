@@ -8,13 +8,18 @@
   --bg-tertiary: #e9ecef;
   --text-primary: #212529;
   --text-secondary: #495057;
-  --text-tertiary: #868e96;
+  /* WCAG AA: #6b7280 ≈ 4.6:1 on white (was #868e96 ≈ 3.3:1) */
+  --text-tertiary: #6b7280;
   --accent-primary: #2563eb;
   --accent-secondary: #7c3aed;
   --border-color: #dee2e6;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --error: #ef4444;
+  /* Foreground for text/icons placed on an accent fill. White passes on this
+     dark-blue accent; light themes with bright accents use dark on-accent. */
+  --on-accent: #ffffff;
+  /* AA-legible semantic colors for use as foreground text on a light bg. */
+  --success: #15803d;
+  --warning: #b45309;
+  --error: #b91c1c;
   --glass-bg: rgba(255, 255, 255, 0.92);
   --code-block-bg: #1e293b;
   --code-text: #e2e8f0;
@@ -26,10 +31,19 @@
   --bg-tertiary: #252529;
   --text-primary: #ffffff;
   --text-secondary: #a0a0a8;
-  --text-tertiary: #6b6b73;
+  /* WCAG AA: #8a8a93 ≈ 5.1:1 on #0d0d0f (was #6b6b73 ≈ 3.7:1) */
+  --text-tertiary: #8a8a93;
   --accent-primary: #4a9eff;
   --accent-secondary: #7c3aed;
   --border-color: #2e2e35;
+  /* Bright accent → dark on-accent text for legible chat bubbles / buttons. */
+  --on-accent: #07203a;
+  /* Bright semantic colors are legible on the dark bg; defined here (not just
+     in :root) so the dark-family themes don't inherit the light theme's dark
+     semantic colors. .transparent inherits these. */
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
   --glass-bg: rgba(13, 13, 15, 0.92);
   --code-block-bg: #1a1a2e;
   --code-text: #d4d4d8;
@@ -42,10 +56,11 @@
   --bg-tertiary: rgba(37, 37, 41, 0.5);
   --text-primary: #ffffff;
   --text-secondary: #b0b0b8;
-  --text-tertiary: #7b7b83;
+  --text-tertiary: #8e8e96;
   --accent-primary: #5aafff;
   --accent-secondary: #9c5aff;
   --border-color: rgba(255, 255, 255, 0.08);
+  --on-accent: #06203a;
   --glass-bg: rgba(10, 10, 12, 0.7);
   --code-block-bg: rgba(15, 15, 25, 0.8);
   --code-text: #d4d4d8;
@@ -58,13 +73,17 @@
   --bg-tertiary: #ece8e1;
   --text-primary: #1a1a1a;
   --text-secondary: #4a4a4a;
-  --text-tertiary: #7a7a7a;
+  /* WCAG AA: #6b6b6b ≈ 4.7:1 on the cream bg (was #7a7a7a ≈ 4.0:1) */
+  --text-tertiary: #6b6b6b;
   --accent-primary: #e85a6b;
   --accent-secondary: #d14d5c;
   --border-color: #e0dbd4;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
+  /* Coral accent fails white; use dark on-accent text. */
+  --on-accent: #2e0a0f;
+  /* AA-legible semantic colors on the cream background. */
+  --success: #15803d;
+  --warning: #b45309;
+  --error: #b91c1c;
   --glass-bg: rgba(250, 248, 245, 0.95);
   --code-block-bg: #2d2a2e;
   --code-text: #e3e1e8;
@@ -209,9 +228,33 @@ a:focus-visible,
   border-radius: 4px;
 }
 
+/* Foreground for content sitting on an accent-colored fill (chat bubbles,
+   primary buttons). Chosen per-theme so it always meets WCAG AA contrast,
+   without recoloring the accent itself. */
+.text-on-accent {
+  color: var(--on-accent);
+}
+
 /* Active press feedback */
 button:active {
   transform: scale(0.98);
+}
+
+/* Honor the OS "reduce motion" preference: neutralize entrance animations,
+   infinite loops (typing dots, shimmer, spinners), and the press scale. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  button:active {
+    transform: none;
+  }
 }
 
 .glass {
@@ -349,23 +392,6 @@ button:active {
 .markdown-content h2:first-child,
 .markdown-content h3:first-child {
   margin-top: 0;
-}
-
-/* Sticky copy button inside code blocks */
-.code-block-pre {
-  position: relative;
-}
-
-.sticky-copy-btn {
-  position: sticky;
-  bottom: 8px;
-  float: right;
-  margin-top: -20px;
-  background: rgba(26, 26, 46, 0.95);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--border-color);
-  z-index: 10;
 }
 
 /* Scale-in animation for modals and command palette */
