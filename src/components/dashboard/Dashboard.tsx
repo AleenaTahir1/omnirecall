@@ -1,12 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   viewMode,
-  activeModel,
-  activeProvider,
-  providers,
   isGenerating,
   currentQuery,
   isSettingsOpen,
@@ -18,20 +14,17 @@ import {
   deleteChatSession,
   addDocument,
   removeDocument,
-  ChatMessage,
   ChatSession,
   Document,
-  estimateTokens,
   branchFromMessage,
-  updateBranchMessages,
-  saveChatHistoryNow,
+  loadSession,
+  startNewChat,
   searchResults,
   stopGeneration,
   isCommandPaletteOpen,
   isMaximized,
-  systemPrompt,
 } from "../../stores/appStore";
-import { useChatSubmit, parseApiError } from "../../hooks/useChatSubmit";
+import { useChatSubmit } from "../../hooks/useChatSubmit";
 import { useDocumentLoader } from "../../hooks/useDocumentLoader";
 import { useDebouncedSearch } from "../../hooks/useDebouncedSearch";
 import { useAutoResize } from "../../hooks/useAutoResize";
@@ -81,7 +74,7 @@ export function Dashboard() {
   // Shared hooks - eliminates code duplication with Spotlight
   const { docsWithContent, loadingDocs, totalDocsLoaded } = useDocumentLoader();
   const { localSearchQuery, setLocalSearchQuery } = useDebouncedSearch(300);
-  const { handleSubmit, cleanupStream } = useChatSubmit(docsWithContent, setError);
+  const { handleSubmit, regenerate, retryLast, cleanupStream } = useChatSubmit(docsWithContent, setError);
   const handleAutoResize = useAutoResize(200);
 
   // Clean up stream listener on unmount
@@ -136,27 +129,13 @@ export function Dashboard() {
   };
 
   const handleNewChat = () => {
-    currentMessages.value = [];
-    activeSessionId.value = null;
-    activeBranchId.value = null; // Reset branch state for new chat
+    startNewChat();
     setError(null);
-    currentQuery.value = "";
     inputRef.current?.focus();
   };
 
   const handleLoadSession = (session: ChatSession) => {
-    // Restore the active branch state
-    const branchId = session.activeBranchId || null;
-    activeBranchId.value = branchId;
-
-    // Load messages from the active branch or main
-    if (branchId && session.branchMessages && session.branchMessages[branchId]) {
-      currentMessages.value = session.branchMessages[branchId];
-    } else {
-      currentMessages.value = session.messages;
-    }
-
-    activeSessionId.value = session.id;
+    loadSession(session);
     setError(null);
   };
 
@@ -228,113 +207,6 @@ export function Dashboard() {
   const handleBranch = (messageId: string) => {
     if (!activeSessionId.value) return;
     branchFromMessage(activeSessionId.value, messageId);
-  };
-
-  // Regenerate: Create a branch from the user message before this assistant response.
-  // Mirrors useChatSubmit's race-safe pattern (id-based message lookup,
-  // session/branch capture) so navigating away mid-regenerate doesn't
-  // corrupt some other thread.
-  const handleRegenerate = async (assistantMessageId: string) => {
-    if (!activeSessionId.value || isGenerating.value) return;
-
-    const msgIndex = currentMessages.value.findIndex(m => m.id === assistantMessageId);
-    if (msgIndex <= 0) return;
-
-    const userMessage = currentMessages.value[msgIndex - 1];
-    if (userMessage.role !== "user") return;
-
-    const branchId = branchFromMessage(activeSessionId.value, userMessage.id);
-    if (!branchId) return;
-
-    const provider = providers.value.find(p => p.id === activeProvider.value);
-    if (!provider?.apiKey && provider?.id !== "ollama") return;
-
-    isGenerating.value = true;
-
-    const newAssistantId = crypto.randomUUID();
-    const assistantMessage: ChatMessage = {
-      id: newAssistantId,
-      role: "assistant",
-      content: "",
-      tokenCount: 0,
-    };
-    currentMessages.value = [...currentMessages.value, assistantMessage];
-
-    const submitSessionId = activeSessionId.value;
-    const submitBranchId = activeBranchId.value;
-
-    try {
-      const history = currentMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-      const documentContext = docsWithContent
-        .filter(d => d.content && d.content.length > 0)
-        .map(d => ({ name: d.name, content: d.content! }));
-
-      let unlisten: UnlistenFn | null = null;
-      let fullResponse = "";
-      let throttleTimer: ReturnType<typeof setTimeout> | null = null;
-
-      const stillOnSameThread = () => (
-        activeSessionId.value === submitSessionId &&
-        activeBranchId.value === submitBranchId
-      );
-
-      const flushUpdate = () => {
-        throttleTimer = null;
-        if (!stillOnSameThread()) return;
-        const msgs = currentMessages.value;
-        const idx = msgs.findIndex(m => m.id === newAssistantId);
-        if (idx === -1) return;
-        const next = [...msgs];
-        next[idx] = { ...next[idx], content: fullResponse };
-        currentMessages.value = next;
-      };
-
-      unlisten = await listen<{ chunk: string; done: boolean }>("chat-stream", (event) => {
-        if (!event.payload.done) {
-          fullResponse += event.payload.chunk;
-          if (!throttleTimer) {
-            throttleTimer = setTimeout(flushUpdate, 80);
-          }
-        } else {
-          if (throttleTimer) { clearTimeout(throttleTimer); throttleTimer = null; }
-          if (unlisten) { unlisten(); unlisten = null; }
-
-          if (stillOnSameThread()) {
-            const msgs = currentMessages.value;
-            const idx = msgs.findIndex(m => m.id === newAssistantId);
-            if (idx !== -1) {
-              const next = [...msgs];
-              next[idx] = {
-                ...next[idx],
-                content: fullResponse,
-                tokenCount: estimateTokens(fullResponse),
-              };
-              currentMessages.value = next;
-            }
-          }
-
-          isGenerating.value = false;
-
-          if (fullResponse.trim().length > 0 && submitSessionId) {
-            updateBranchMessages(submitSessionId, submitBranchId, stillOnSameThread() ? currentMessages.value : []);
-            saveChatHistoryNow();
-          }
-        }
-      });
-
-      await invoke("send_message_stream", {
-        message: userMessage.content,
-        history: history.slice(0, -1),
-        documents: documentContext,
-        provider: activeProvider.value,
-        model: activeModel.value,
-        apiKey: provider?.apiKey || "",
-        systemPrompt: systemPrompt.value.trim() || null,
-      });
-    } catch (err: any) {
-      setError(parseApiError(err));
-      isGenerating.value = false;
-    }
   };
 
   const currentSession = chatHistory.value.find(s => s.id === activeSessionId.value);
@@ -823,7 +695,7 @@ export function Dashboard() {
                       {/* Regenerate button - only on latest assistant message */}
                       {message.role === "assistant" && index === currentMessages.value.length - 1 && !isGenerating.value && (
                         <button
-                          onClick={() => handleRegenerate(message.id)}
+                          onClick={() => regenerate(message.id)}
                           className="p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
                           title="Regenerate response (creates a new branch)"
                           aria-label="Regenerate response"
@@ -885,12 +757,20 @@ export function Dashboard() {
           <div className="px-4 py-2 bg-error/10 border-t border-error/20 flex items-center justify-between gap-3" role="alert">
             <p className="text-sm text-error flex-1">{error}</p>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {/Settings|API key/i.test(error) && (
+              {/Settings|API key/i.test(error) ? (
                 <button
                   onClick={() => (isSettingsOpen.value = true)}
                   className="px-2.5 py-1 rounded text-xs bg-error/20 text-error hover:bg-error/30 transition-colors"
                 >
                   Open Settings
+                </button>
+              ) : (
+                <button
+                  onClick={() => retryLast()}
+                  disabled={isGenerating.value}
+                  className="px-2.5 py-1 rounded text-xs bg-error/20 text-error hover:bg-error/30 transition-colors disabled:opacity-50"
+                >
+                  Try again
                 </button>
               )}
               <button

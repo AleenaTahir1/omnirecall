@@ -14,6 +14,9 @@ import {
   updateChatSession,
   updateBranchMessages,
   saveChatHistoryNow,
+  branchFromMessage,
+  startNewChat,
+  getSemanticContext,
   ChatMessage,
   ChatSession,
   estimateTokens,
@@ -27,6 +30,11 @@ import {
 /// dead and surface an error rather than leaving the user staring at a
 /// blinking cursor forever.
 const CHUNK_IDLE_TIMEOUT_MS = 60_000;
+
+/// Below this combined document size we just send the full text; above it we
+/// switch to semantic retrieval (top-k relevant chunks) so large corpora don't
+/// blow the model's context window.
+const FULL_DOC_CONTEXT_THRESHOLD = 12_000;
 
 interface DocumentWithContent {
   name: string;
@@ -57,9 +65,7 @@ function handleSlashCommand(input: string, setError: (e: string | null) => void)
   switch (cmd) {
     case "/clear":
     case "/new": {
-      currentMessages.value = [];
-      activeSessionId.value = null;
-      activeBranchId.value = null;
+      startNewChat();
       setError(null);
       return true;
     }
@@ -119,6 +125,42 @@ export function parseApiError(err: any): string {
   return rawMessage;
 }
 
+/// Build the document context payload for a query. For small corpora we send
+/// the full text; for large ones we ask the backend vector store for the most
+/// relevant chunks so we don't overflow the context window. Falls back to full
+/// content if semantic retrieval returns nothing (e.g. nothing indexed yet).
+async function buildDocumentContext(
+  docsWithContent: DocumentWithContent[],
+  query: string,
+): Promise<{ name: string; content: string }[]> {
+  const withContent = docsWithContent.filter(d => d.content && d.content.length > 0);
+  if (withContent.length === 0) return [];
+
+  const totalChars = withContent.reduce((sum, d) => sum + (d.content?.length ?? 0), 0);
+  if (totalChars <= FULL_DOC_CONTEXT_THRESHOLD) {
+    return withContent.map(d => ({ name: d.name, content: d.content! }));
+  }
+
+  // Large corpus: prefer semantic retrieval.
+  try {
+    const semantic = await getSemanticContext(query);
+    if (semantic && semantic.trim().length > 0) {
+      return [{ name: "Relevant document excerpts", content: semantic }];
+    }
+  } catch {
+    // fall through to full content
+  }
+  return withContent.map(d => ({ name: d.name, content: d.content! }));
+}
+
+/// Captured context for the last send, so the error banner can offer a
+/// one-click "Try again" without the user re-typing their message.
+interface LastSend {
+  kind: "submit" | "regenerate";
+  message: string;
+  assistantMessageId?: string;
+}
+
 export function useChatSubmit(
   docsWithContent: DocumentWithContent[],
   setError: (err: string | null) => void,
@@ -127,6 +169,7 @@ export function useChatSubmit(
   const streamingContentRef = useRef("");
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSendRef = useRef<LastSend | null>(null);
 
   // Clean up stream listener
   const cleanupStream = useCallback(() => {
@@ -144,6 +187,115 @@ export function useChatSubmit(
     }
     streamingContentRef.current = "";
   }, []);
+
+  /// Shared streaming core used by both the initial send and regenerate.
+  /// Handles the listener, 80ms throttle, idle watchdog, race-safe flush, and
+  /// final token count. Persistence differs per caller, so it is delegated to
+  /// the onComplete callback (which receives the final content and whether the
+  /// user is still looking at the originating thread).
+  const runAssistantStream = useCallback(
+    async (params: {
+      assistantId: string;
+      submitSessionId: string | null;
+      submitBranchId: string | null;
+      message: string;
+      history: { role: string; content: string }[];
+      documents: { name: string; content: string }[];
+      apiKey: string;
+      provider?: string;
+      model?: string;
+      onComplete: (finalContent: string, sameThread: boolean) => void;
+    }) => {
+      const { assistantId, submitSessionId, submitBranchId, message, history, documents, apiKey, onComplete } = params;
+      streamingContentRef.current = "";
+
+      const stillOnSameThread = () =>
+        activeSessionId.value === submitSessionId && activeBranchId.value === submitBranchId;
+      const findAssistantIndex = (msgs: ChatMessage[]) => msgs.findIndex(m => m.id === assistantId);
+
+      const flushStreamUpdate = () => {
+        if (!stillOnSameThread()) return;
+        const msgs = currentMessages.value;
+        const idx = findAssistantIndex(msgs);
+        if (idx === -1) return;
+        const next = [...msgs];
+        next[idx] = { ...next[idx], content: streamingContentRef.current };
+        currentMessages.value = next;
+      };
+
+      const armIdleTimer = () => {
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = setTimeout(() => {
+          stopGeneration();
+          cleanupStream();
+          isGenerating.value = false;
+          setError("Connection stalled. The AI provider stopped responding. Please try again.");
+        }, CHUNK_IDLE_TIMEOUT_MS);
+      };
+
+      armIdleTimer();
+
+      unlistenRef.current = await listen<{ chunk: string; done: boolean }>("chat-stream", (event) => {
+        if (!event.payload.done) {
+          streamingContentRef.current += event.payload.chunk;
+          armIdleTimer();
+          if (!throttleTimerRef.current) {
+            throttleTimerRef.current = setTimeout(() => {
+              throttleTimerRef.current = null;
+              flushStreamUpdate();
+            }, 80);
+          }
+        } else {
+          if (throttleTimerRef.current) {
+            clearTimeout(throttleTimerRef.current);
+            throttleTimerRef.current = null;
+          }
+          if (idleTimerRef.current) {
+            clearTimeout(idleTimerRef.current);
+            idleTimerRef.current = null;
+          }
+
+          const finalContent = streamingContentRef.current;
+          const sameThread = stillOnSameThread();
+
+          if (sameThread) {
+            const msgs = currentMessages.value;
+            const idx = findAssistantIndex(msgs);
+            if (idx !== -1) {
+              const next = [...msgs];
+              next[idx] = {
+                ...next[idx],
+                content: finalContent,
+                tokenCount: estimateTokens(finalContent),
+              };
+              currentMessages.value = next;
+            }
+          }
+
+          isGenerating.value = false;
+          cleanupStream();
+          onComplete(finalContent, sameThread);
+        }
+      });
+
+      try {
+        await invoke("send_message_stream", {
+          message,
+          history,
+          documents,
+          provider: params.provider ?? activeProvider.value,
+          model: params.model ?? activeModel.value,
+          apiKey,
+          systemPrompt: systemPrompt.value.trim() || null,
+        });
+      } catch (err: any) {
+        setError(parseApiError(err));
+        isGenerating.value = false;
+        cleanupStream();
+      }
+    },
+    [cleanupStream, setError],
+  );
 
   const handleSubmit = useCallback(async () => {
     if (!currentQuery.value.trim() || isGenerating.value) return;
@@ -188,6 +340,7 @@ export function useChatSubmit(
     currentQuery.value = "";
     isGenerating.value = true;
     setError(null);
+    lastSendRef.current = { kind: "submit", message: query };
 
     // Create placeholder for assistant message
     const assistantId = crypto.randomUUID();
@@ -200,155 +353,174 @@ export function useChatSubmit(
     currentMessages.value = [...newMessages, assistantMessage];
 
     // Capture the session/branch context at submit time. If the user
-    // navigates away mid-stream we drop the update on the floor instead of
-    // mutating whatever they're now looking at.
+    // navigates away mid-stream we don't mutate whatever they're now looking at.
     const submitSessionId = activeSessionId.value;
     const submitBranchId = activeBranchId.value;
 
-    try {
-      const history = newMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-      const documentContext = docsWithContent
-        .filter(d => d.content && d.content.length > 0)
-        .map(d => ({ name: d.name, content: d.content! }));
+    const history = newMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+    const documents = await buildDocumentContext(docsWithContent, query);
 
-      streamingContentRef.current = "";
+    await runAssistantStream({
+      assistantId,
+      submitSessionId,
+      submitBranchId,
+      message: query,
+      history,
+      documents,
+      apiKey: provider?.apiKey || "",
+      onComplete: (finalContent, sameThread) => {
+        if (!submitSessionId) {
+          // First message in a fresh chat: only create a session if we
+          // actually have content. Empty stream completions (network failure,
+          // provider returns nothing) shouldn't litter the sidebar.
+          if (finalContent.trim().length > 0) {
+            const messagesToSave = sameThread
+              ? currentMessages.value
+              : [
+                  ...newMessages,
+                  { ...assistantMessage, content: finalContent, tokenCount: estimateTokens(finalContent) },
+                ];
+            const newSession: ChatSession = {
+              id: crypto.randomUUID(),
+              title: userMessage.content.slice(0, 30) + (userMessage.content.length > 30 ? "..." : ""),
+              messages: messagesToSave,
+              branches: [],
+              branchMessages: {},
+              createdAt: new Date().toISOString(),
+              folderId: null,
+            };
+            addChatSession(newSession);
+            if (sameThread) {
+              activeSessionId.value = newSession.id;
+            }
+          }
+        } else if (sameThread) {
+          if (submitBranchId) {
+            updateBranchMessages(submitSessionId, submitBranchId, currentMessages.value);
+          } else {
+            updateChatSession(submitSessionId, currentMessages.value);
+          }
+          saveChatHistoryNow();
+        } else if (finalContent.trim().length > 0) {
+          // User navigated away from an existing session mid-stream. Persist
+          // the reconstructed thread to the captured session/branch so the
+          // answer isn't lost — they may come back to it.
+          const finalMessages = [
+            ...newMessages,
+            { ...assistantMessage, content: finalContent, tokenCount: estimateTokens(finalContent) },
+          ];
+          if (submitBranchId) {
+            updateBranchMessages(submitSessionId, submitBranchId, finalMessages);
+          } else {
+            updateChatSession(submitSessionId, finalMessages);
+          }
+          saveChatHistoryNow();
+        }
+      },
+    });
+  }, [docsWithContent, setError, runAssistantStream]);
 
-      const stillOnSameThread = () => (
-        activeSessionId.value === submitSessionId &&
-        activeBranchId.value === submitBranchId
-      );
+  /// Regenerate an assistant reply. Creates a branch from the preceding user
+  /// message, then streams a fresh answer into it. Optionally overrides the
+  /// provider/model so the user can retry on a different model.
+  const regenerate = useCallback(
+    async (assistantMessageId: string, overrideProvider?: string, overrideModel?: string) => {
+      if (!activeSessionId.value || isGenerating.value) return;
 
-      // Locate the assistant message by id rather than a captured index.
-      // If a regenerate / branch / new chat shifts indices we must not
-      // overwrite the wrong message.
-      const findAssistantIndex = (msgs: ChatMessage[]) =>
-        msgs.findIndex(m => m.id === assistantId);
+      const msgs = currentMessages.value;
+      const msgIndex = msgs.findIndex(m => m.id === assistantMessageId);
+      if (msgIndex <= 0) return;
 
-      // Throttled UI update - only update DOM every 80ms during streaming
-      const flushStreamUpdate = () => {
-        if (!stillOnSameThread()) return;
-        const msgs = currentMessages.value;
-        const idx = findAssistantIndex(msgs);
-        if (idx === -1) return;
-        const next = [...msgs];
-        next[idx] = { ...next[idx], content: streamingContentRef.current };
-        currentMessages.value = next;
+      const userMessage = msgs[msgIndex - 1];
+      if (userMessage.role !== "user") return;
+
+      const providerId = overrideProvider || activeProvider.value;
+      const provider = providers.value.find(p => p.id === providerId);
+      if (!provider?.apiKey && provider?.id !== "ollama") {
+        setError(`No API key for ${provider?.name ?? providerId}. Open Settings (Ctrl+,) to add one.`);
+        return;
+      }
+
+      const sessionId = activeSessionId.value;
+      // branchFromMessage sets currentMessages to the branched copy (up to and
+      // including the user message) and activeBranchId to the new branch.
+      const branchId = branchFromMessage(sessionId, userMessage.id);
+      if (!branchId) return;
+
+      isGenerating.value = true;
+      setError(null);
+
+      const assistantId = crypto.randomUUID();
+      const assistantMessage: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        tokenCount: 0,
       };
+      const baseMessages = [...currentMessages.value, assistantMessage];
+      currentMessages.value = baseMessages;
+      lastSendRef.current = { kind: "regenerate", message: userMessage.content, assistantMessageId };
 
-      const armIdleTimer = () => {
-        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-        idleTimerRef.current = setTimeout(() => {
-          // No chunk in CHUNK_IDLE_TIMEOUT_MS - tell the backend to drop
-          // the connection and surface a friendly error.
-          stopGeneration();
-          cleanupStream();
-          isGenerating.value = false;
-          setError("Connection stalled. The AI provider stopped responding. Please try again.");
-        }, CHUNK_IDLE_TIMEOUT_MS);
-      };
+      const submitSessionId = sessionId;
+      const submitBranchId = branchId;
 
-      armIdleTimer();
+      // History = everything before the user message (exclude the user message
+      // itself and the just-added empty placeholder).
+      const history = baseMessages.slice(0, -2).map(m => ({ role: m.role, content: m.content }));
+      const documents = await buildDocumentContext(docsWithContent, userMessage.content);
 
-      unlistenRef.current = await listen<{ chunk: string; done: boolean }>("chat-stream", (event) => {
-        if (!event.payload.done) {
-          streamingContentRef.current += event.payload.chunk;
-          armIdleTimer();
-
-          // Throttle UI updates to every 80ms instead of every chunk
-          if (!throttleTimerRef.current) {
-            throttleTimerRef.current = setTimeout(() => {
-              throttleTimerRef.current = null;
-              flushStreamUpdate();
-            }, 80);
-          }
-        } else {
-          // Stream complete - final flush with token count
-          if (throttleTimerRef.current) {
-            clearTimeout(throttleTimerRef.current);
-            throttleTimerRef.current = null;
-          }
-          if (idleTimerRef.current) {
-            clearTimeout(idleTimerRef.current);
-            idleTimerRef.current = null;
-          }
-
-          const finalContent = streamingContentRef.current;
-          const sameThread = stillOnSameThread();
-
-          if (sameThread) {
-            const msgs = currentMessages.value;
-            const idx = findAssistantIndex(msgs);
-            if (idx !== -1) {
-              const next = [...msgs];
-              next[idx] = {
-                ...next[idx],
-                content: finalContent,
-                tokenCount: estimateTokens(finalContent),
-              };
-              currentMessages.value = next;
-            }
-          }
-
-          isGenerating.value = false;
-          cleanupStream();
-
-          // Persist regardless of whether the user is still looking at
-          // this thread — they may come back. Write to the captured
-          // session/branch, not the current one.
-          if (!submitSessionId) {
-            // First message in a fresh chat: only create a session if we
-            // actually have content. Empty stream completions (network
-            // failure, provider returns nothing) shouldn't litter the
-            // sidebar with empty conversations.
-            if (finalContent.trim().length > 0) {
-              const messagesToSave = sameThread
-                ? currentMessages.value
-                : [
-                    ...newMessages,
-                    { ...assistantMessage, content: finalContent, tokenCount: estimateTokens(finalContent) },
-                  ];
-              const newSession: ChatSession = {
-                id: crypto.randomUUID(),
-                title: userMessage.content.slice(0, 30) + (userMessage.content.length > 30 ? "..." : ""),
-                messages: messagesToSave,
-                branches: [],
-                branchMessages: {},
-                createdAt: new Date().toISOString(),
-                folderId: null,
-              };
-              addChatSession(newSession);
-              if (sameThread) {
-                activeSessionId.value = newSession.id;
-              }
-            }
-          } else if (sameThread) {
-            if (submitBranchId) {
-              updateBranchMessages(submitSessionId, submitBranchId, currentMessages.value);
-            } else {
-              updateChatSession(submitSessionId, currentMessages.value);
-            }
+      await runAssistantStream({
+        assistantId,
+        submitSessionId,
+        submitBranchId,
+        message: userMessage.content,
+        history,
+        documents,
+        apiKey: provider?.apiKey || "",
+        provider: providerId,
+        model: overrideModel || activeModel.value,
+        onComplete: (finalContent, sameThread) => {
+          if (finalContent.trim().length > 0) {
+            // Fix for the old data-loss bug: when the user has navigated away,
+            // persist the reconstructed branch messages instead of writing [].
+            const finalMessages = sameThread
+              ? currentMessages.value
+              : [
+                  ...baseMessages.slice(0, -1),
+                  { ...assistantMessage, content: finalContent, tokenCount: estimateTokens(finalContent) },
+                ];
+            updateBranchMessages(submitSessionId, submitBranchId, finalMessages);
             saveChatHistoryNow();
           }
-        }
+        },
       });
+    },
+    [docsWithContent, setError, runAssistantStream],
+  );
 
-      // Start streaming
-      await invoke("send_message_stream", {
-        message: query,
-        history,
-        documents: documentContext,
-        provider: activeProvider.value,
-        model: activeModel.value,
-        apiKey: provider?.apiKey || "",
-        systemPrompt: systemPrompt.value.trim() || null,
-      });
-
-    } catch (err: any) {
-      setError(parseApiError(err));
-      isGenerating.value = false;
-      cleanupStream();
+  /// Retry the last send after a failure. Re-runs the most recent submit
+  /// (re-using the captured user message) or regenerate, without the user
+  /// having to retype anything.
+  const retryLast = useCallback(async () => {
+    const last = lastSendRef.current;
+    if (!last || isGenerating.value) return;
+    setError(null);
+    if (last.kind === "regenerate" && last.assistantMessageId) {
+      await regenerate(last.assistantMessageId);
+      return;
     }
-  }, [docsWithContent, setError, cleanupStream]);
+    // Re-submit: drop any empty/failed trailing assistant placeholder, then
+    // re-send the captured user message.
+    const msgs = currentMessages.value;
+    const trimmed = msgs[msgs.length - 1]?.role === "assistant" && !msgs[msgs.length - 1].content
+      ? msgs.slice(0, -1)
+      : msgs;
+    // Remove the trailing user message too (handleSubmit re-adds it from currentQuery).
+    const withoutUser = trimmed[trimmed.length - 1]?.role === "user" ? trimmed.slice(0, -1) : trimmed;
+    currentMessages.value = withoutUser;
+    currentQuery.value = last.message;
+    await handleSubmit();
+  }, [regenerate, handleSubmit, setError]);
 
-  return { handleSubmit, cleanupStream };
+  return { handleSubmit, regenerate, retryLast, cleanupStream };
 }

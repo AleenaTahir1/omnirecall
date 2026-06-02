@@ -5,8 +5,8 @@ import {
     searchChatHistory,
     searchResults,
     chatHistory,
-    currentMessages,
-    activeSessionId,
+    loadSession,
+    startNewChat,
     viewMode,
     isSettingsOpen,
     isCompareMode,
@@ -47,8 +47,7 @@ export function CommandPalette() {
             category: "action",
             keywords: ["create", "start", "conversation"],
             action: () => {
-                currentMessages.value = [];
-                activeSessionId.value = null;
+                startNewChat();
                 isCommandPaletteOpen.value = false;
             },
         },
@@ -116,8 +115,7 @@ export function CommandPalette() {
         icon: <MessageIcon size={16} />,
         category: "navigation" as const,
         action: () => {
-            currentMessages.value = session.messages;
-            activeSessionId.value = session.id;
+            loadSession(session);
             isCommandPaletteOpen.value = false;
         },
     }));
@@ -189,8 +187,7 @@ export function CommandPalette() {
                     const result = searchResults.value[selectedIndex];
                     const session = chatHistory.value.find(s => s.id === result.sessionId);
                     if (session) {
-                        currentMessages.value = session.messages;
-                        activeSessionId.value = session.id;
+                        loadSession(session);
                         isCommandPaletteOpen.value = false;
                     }
                 }
@@ -326,8 +323,7 @@ export function CommandPalette() {
                                             onClick={() => {
                                                 const session = chatHistory.value.find(s => s.id === result.sessionId);
                                                 if (session) {
-                                                    currentMessages.value = session.messages;
-                                                    activeSessionId.value = session.id;
+                                                    loadSession(session);
                                                     isCommandPaletteOpen.value = false;
                                                 }
                                             }}

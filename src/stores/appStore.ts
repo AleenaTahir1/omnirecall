@@ -48,6 +48,7 @@ export interface ChatSession {
   createdAt: string;
   folderId?: string | null;
   activeBranchId?: string | null;
+  isPinned?: boolean;
 }
 
 export interface ChatFolder {
@@ -610,8 +611,12 @@ export async function saveDocuments() {
 
 // Actions
 export function updateProviderApiKey(providerId: string, apiKey: string) {
+  // Changing the key invalidates any prior "verified" state — the new key
+  // hasn't been tested. Keep isConnected only when the key is unchanged.
   providers.value = providers.value.map((p) =>
-    p.id === providerId ? { ...p, apiKey } : p
+    p.id === providerId
+      ? { ...p, apiKey, isConnected: p.apiKey === apiKey ? p.isConnected : false }
+      : p
   );
   saveProviders();
 }
@@ -638,6 +643,70 @@ export function updateChatSession(sessionId: string, messages: ChatMessage[]) {
 export function deleteChatSession(sessionId: string) {
   chatHistory.value = chatHistory.value.filter(s => s.id !== sessionId);
   saveChatHistoryNow(); // Immediate for destructive action
+}
+
+/// Canonical "open this conversation" action. Restores the session's active
+/// branch (and its messages) so we never leave activeBranchId pointing at a
+/// previous session's branch. Every entry point — sidebar, folders, command
+/// palette, and the App.tsx keyboard shortcuts — routes through this so branch
+/// state can't drift out of sync.
+export function loadSession(session: ChatSession) {
+  const branchId = session.activeBranchId || null;
+  if (branchId && session.branchMessages && session.branchMessages[branchId]) {
+    currentMessages.value = session.branchMessages[branchId];
+  } else {
+    currentMessages.value = session.messages;
+  }
+  activeBranchId.value = branchId;
+  activeSessionId.value = session.id;
+}
+
+/// Load a session by its position in chatHistory (Ctrl+1-9 quick nav).
+export function loadSessionByIndex(index: number): boolean {
+  const session = chatHistory.value[index];
+  if (!session) return false;
+  loadSession(session);
+  return true;
+}
+
+/// Move to the previous (-1) or next (+1) session relative to the active one.
+export function loadAdjacentSession(direction: -1 | 1): boolean {
+  if (!activeSessionId.value) return false;
+  const i = chatHistory.value.findIndex(s => s.id === activeSessionId.value);
+  if (i === -1) return false;
+  const j = i + direction;
+  if (j < 0 || j >= chatHistory.value.length) return false;
+  loadSession(chatHistory.value[j]);
+  return true;
+}
+
+/// Start a fresh, unsaved chat. Clears the working conversation AND the active
+/// branch so the next send can't write into a stale branch.
+export function startNewChat() {
+  currentMessages.value = [];
+  activeSessionId.value = null;
+  activeBranchId.value = null;
+  currentQuery.value = "";
+}
+
+/// Rename a chat session. Titles are otherwise auto-derived from the first
+/// user message; this lets the user give a conversation a meaningful name.
+export function updateSessionTitle(sessionId: string, title: string) {
+  const trimmed = title.trim();
+  if (!trimmed) return;
+  chatHistory.value = chatHistory.value.map(s =>
+    s.id === sessionId ? { ...s, title: trimmed.slice(0, 120) } : s
+  );
+  saveChatHistoryNow();
+}
+
+/// Toggle a session's pinned state. Pinned sessions surface in their own group
+/// above the date groups in the sidebar.
+export function toggleSessionPinned(sessionId: string) {
+  chatHistory.value = chatHistory.value.map(s =>
+    s.id === sessionId ? { ...s, isPinned: !s.isPinned } : s
+  );
+  saveChatHistoryNow();
 }
 
 export function updateSessionFolder(sessionId: string, folderId: string | null) {

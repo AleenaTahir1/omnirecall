@@ -7,8 +7,6 @@ import {
   isCommandPaletteOpen,
   isCompareMode,
   currentMessages,
-  activeSessionId,
-  chatHistory,
   stopGeneration,
   isGenerating,
   isFullscreen,
@@ -16,6 +14,9 @@ import {
   loadPersistedData,
   applyThemeClasses,
   flushPendingSaves,
+  startNewChat,
+  loadSessionByIndex,
+  loadAdjacentSession,
 } from "./stores/appStore";
 import { Spotlight } from "./components/spotlight/Spotlight";
 import { Dashboard } from "./components/dashboard/Dashboard";
@@ -64,8 +65,7 @@ export function App() {
       // New Chat (Ctrl+N)
       if (e.key === "n" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        currentMessages.value = [];
-        activeSessionId.value = null;
+        startNewChat();
         return;
       }
 
@@ -106,39 +106,21 @@ export function App() {
       // Quick Chat Navigation (Ctrl+1-9)
       if ((e.ctrlKey || e.metaKey) && e.key >= "1" && e.key <= "9") {
         e.preventDefault();
-        const index = parseInt(e.key) - 1;
-        if (chatHistory.value[index]) {
-          currentMessages.value = chatHistory.value[index].messages;
-          activeSessionId.value = chatHistory.value[index].id;
-        }
+        loadSessionByIndex(parseInt(e.key) - 1);
         return;
       }
 
       // Previous Chat (Ctrl+[)
       if (e.key === "[" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        if (activeSessionId.value) {
-          const currentIndex = chatHistory.value.findIndex(s => s.id === activeSessionId.value);
-          if (currentIndex > 0) {
-            const prevSession = chatHistory.value[currentIndex - 1];
-            currentMessages.value = prevSession.messages;
-            activeSessionId.value = prevSession.id;
-          }
-        }
+        loadAdjacentSession(-1);
         return;
       }
 
       // Next Chat (Ctrl+])
       if (e.key === "]" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        if (activeSessionId.value) {
-          const currentIndex = chatHistory.value.findIndex(s => s.id === activeSessionId.value);
-          if (currentIndex < chatHistory.value.length - 1) {
-            const nextSession = chatHistory.value[currentIndex + 1];
-            currentMessages.value = nextSession.messages;
-            activeSessionId.value = nextSession.id;
-          }
-        }
+        loadAdjacentSession(1);
         return;
       }
 

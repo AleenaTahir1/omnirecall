@@ -213,6 +213,7 @@ function ProviderCardCompact({ provider }: { provider: any }) {
     setTestMessage(null);
     try {
       await invoke("test_api_key", { provider: provider.id, apiKey, baseUrl: effectiveBaseUrl });
+      updateProviderApiKey(provider.id, apiKey);
       setTestResult("success");
       setTestMessage("✓ Connected!");
       setProviderConnected(provider.id, true);
@@ -269,7 +270,11 @@ function ProviderCardCompact({ provider }: { provider: any }) {
               <input
                 type={showKey ? "text" : "password"}
                 value={apiKey}
-                onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
+                onInput={(e) => {
+                  setApiKey((e.target as HTMLInputElement).value);
+                  if (testResult !== null) { setTestResult(null); setTestMessage(null); }
+                  if (provider.isConnected) setProviderConnected(provider.id, false);
+                }}
                 onBlur={handleSave}
                 placeholder="API key..."
                 aria-label={`${provider.name} API key`}
@@ -539,6 +544,9 @@ function ProviderCard({ provider }: { provider: any }) {
     setTestMessage(null);
     try {
       await invoke("test_api_key", { provider: provider.id, apiKey, baseUrl: effectiveBaseUrl });
+      // Persist the exact key that was just validated so the saved key and the
+      // verified state can't diverge.
+      updateProviderApiKey(provider.id, apiKey);
       setTestResult("success");
       setTestMessage("✓ Connection successful! API key is valid.");
       setProviderConnected(provider.id, true);
@@ -592,7 +600,12 @@ function ProviderCard({ provider }: { provider: any }) {
               <input
                 type={showKey ? "text" : "password"}
                 value={apiKey}
-                onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
+                onInput={(e) => {
+                  setApiKey((e.target as HTMLInputElement).value);
+                  // Editing the key invalidates the prior test result.
+                  if (testResult !== null) { setTestResult(null); setTestMessage(null); }
+                  if (provider.isConnected) setProviderConnected(provider.id, false);
+                }}
                 onBlur={handleSave}
                 placeholder="Enter API key..."
                 className="w-full px-3 py-2 pr-9 bg-bg-tertiary border border-border rounded-lg text-text-primary text-sm outline-none focus:border-accent-primary transition-colors"
@@ -960,8 +973,9 @@ function PrivacyTab({ compact = false }: { compact?: boolean }) {
   const handleReset = async () => {
     if (!confirmingReset) {
       setConfirmingReset(true);
-      // Auto-cancel the "are you sure" if the user wanders off.
-      setTimeout(() => setConfirmingReset(prev => prev), 5000);
+      // Auto-cancel the "are you sure" if the user wanders off. (Previously a
+      // no-op: setConfirmingReset(prev => prev) never disarmed.)
+      setTimeout(() => setConfirmingReset(false), 5000);
       return;
     }
     setResetting(true);
