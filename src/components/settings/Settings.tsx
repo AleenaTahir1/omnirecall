@@ -291,7 +291,7 @@ function ProviderCardCompact({ provider }: { provider: any }) {
                 testResult === "success" ? "bg-success/20 text-success border border-success/30" :
                   testResult === "error" ? "bg-error/20 text-error border border-error/30" :
                     !apiKey ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed" :
-                      "bg-accent-primary text-white hover:bg-accent-primary/90"
+                      "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                 }`}
             >
               {testing ? <SpinnerIcon size={12} className="mx-auto animate-spin" /> :
@@ -320,7 +320,7 @@ function ProviderCardCompact({ provider }: { provider: any }) {
           <button onClick={handleTest} disabled={testing} className={`w-full px-2 py-1.5 rounded text-xs font-medium transition-all ${testing ? "bg-bg-tertiary text-text-tertiary" :
             testResult === "success" ? "bg-success/20 text-success" :
               testResult === "error" ? "bg-error/20 text-error" :
-                "bg-accent-primary text-white hover:bg-accent-primary/90"
+                "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
             }`}>
             {testing ? "Testing..." : testResult === "success" ? "✓ Connected" : testResult === "error" ? "Connection Failed" : "Test Ollama"}
           </button>
@@ -621,7 +621,7 @@ function ProviderCard({ provider }: { provider: any }) {
                 testResult === "success" ? "bg-success/20 text-success border border-success/30" :
                   testResult === "error" ? "bg-error/20 text-error border border-error/30" :
                     !apiKey ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed" :
-                      "bg-accent-primary text-white hover:bg-accent-primary/90"
+                      "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                 }`}
             >
               {testing ? (
@@ -666,7 +666,7 @@ function ProviderCard({ provider }: { provider: any }) {
             className={`w-full px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${testing ? "bg-bg-tertiary text-text-tertiary" :
               testResult === "success" ? "bg-success/20 text-success" :
                 testResult === "error" ? "bg-error/20 text-error" :
-                  "bg-accent-primary text-white hover:bg-accent-primary/90"
+                  "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
               }`}
           >
             {testing ? "Testing..." : testResult === "success" ? "✓ Connected" : testResult === "error" ? "Connection Failed" : "Test Connection"}
@@ -931,7 +931,7 @@ function BehaviorTab({ compact = false }: { compact?: boolean }) {
               className={`px-3 py-1 rounded font-medium transition-colors ${
                 !isDirty || tooLong
                   ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
-                  : "bg-accent-primary text-white hover:bg-accent-primary/90"
+                  : "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
               }`}
             >
               Save
@@ -1015,7 +1015,7 @@ function PrivacyTab({ compact = false }: { compact?: boolean }) {
           className={`mt-2 w-full px-3 py-2 rounded-lg font-medium transition-colors ${
             chatHistory.value.length === 0
               ? "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
-              : "bg-accent-primary text-white hover:bg-accent-primary/90"
+              : "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
           } ${compact ? "text-xs py-1.5" : "text-sm"}`}
         >
           {chatHistory.value.length === 0

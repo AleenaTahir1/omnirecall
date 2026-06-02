@@ -193,7 +193,15 @@ export function Spotlight() {
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          className="flex-1 overflow-y-auto"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-atomic="false"
+          aria-busy={isGenerating.value}
+          aria-label="Conversation"
+        >
           {currentMessages.value.length === 0 && !isGenerating.value && !error ? (
             <div className="h-full flex items-center justify-center p-4">
               <div className="text-center max-w-xs">
@@ -226,7 +234,7 @@ export function Spotlight() {
                   style={{ animationDelay: `${Math.min(index * 50, 200)}ms` }}
                 >
                   <div className={`max-w-[90%] rounded-lg px-3 py-2 text-xs relative ${msg.role === "user"
-                    ? "bg-accent-primary text-white"
+                    ? "bg-accent-primary text-on-accent"
                     : "bg-bg-tertiary text-text-primary"
                     }`}>
                     {msg.role === "user" ? (
@@ -242,7 +250,7 @@ export function Spotlight() {
                         <button
                           onClick={() => handleCopyMessage(msg.content, msg.id)}
                           className={`p-0.5 rounded ${msg.role === "user"
-                            ? "text-white/70 hover:text-white"
+                            ? "text-on-accent opacity-70 hover:opacity-100"
                             : "text-text-tertiary hover:text-text-primary"
                             }`}
                           title="Copy"
@@ -250,7 +258,7 @@ export function Spotlight() {
                           {copiedMessageId === msg.id ? <CheckIcon size={10} /> : <CopyIcon size={10} />}
                         </button>
                         {msg.tokenCount && msg.tokenCount > 10 && (
-                          <span className={`text-[10px] ${msg.role === "user" ? "text-white/50" : "text-text-tertiary/60"
+                          <span className={`text-[10px] ${msg.role === "user" ? "text-on-accent opacity-60" : "text-text-tertiary/60"
                             }`}>
                             ~{msg.tokenCount}
                           </span>
@@ -328,7 +336,7 @@ export function Spotlight() {
                 onClick={handleSubmit}
                 disabled={!currentQuery.value.trim()}
                 className={`p-2 rounded-lg transition-all flex-shrink-0 ${currentQuery.value.trim()
-                  ? "bg-accent-primary text-white hover:bg-accent-primary/90"
+                  ? "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                   : "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
                   }`}
                 title={currentQuery.value.trim() ? "Send (Enter)" : "Type a message to send"}

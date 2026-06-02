@@ -2,6 +2,7 @@ import { useState, useRef } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { providers } from "../../stores/appStore";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
     CompareIcon,
     CloseIcon,
@@ -56,6 +57,8 @@ export function ModelCompare({ onClose }: ModelCompareProps) {
     const [isComparing, setIsComparing] = useState(false);
     const [hasCompared, setHasCompared] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    useFocusTrap(panelRef, true, onClose);
 
     const addModel = (provider: string, model: string) => {
         if (selectedModels.length >= 4) return;
@@ -183,8 +186,15 @@ export function ModelCompare({ onClose }: ModelCompareProps) {
     const completedResponses = responses.filter(r => !r.isLoading && !r.error && r.content);
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="w-full max-w-7xl h-[85vh] bg-bg-primary border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col animate-fade-in">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+            <div
+                ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Model comparison"
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-7xl h-[85vh] bg-bg-primary border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col animate-fade-in"
+            >
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-bg-secondary">
                     <div className="flex items-center gap-3">
@@ -218,6 +228,7 @@ export function ModelCompare({ onClose }: ModelCompareProps) {
                         <button
                             onClick={onClose}
                             className="p-1.5 hover:bg-bg-tertiary rounded-lg text-text-tertiary hover:text-text-primary transition-colors"
+                            aria-label="Close model comparison"
                         >
                             <CloseIcon size={18} />
                         </button>
@@ -242,6 +253,7 @@ export function ModelCompare({ onClose }: ModelCompareProps) {
                                     <button
                                         onClick={() => removeModel(index)}
                                         className={`${colors.text} opacity-60 hover:opacity-100 transition-opacity`}
+                                        aria-label={`Remove ${model.model}`}
                                     >
                                         <CloseIcon size={12} />
                                     </button>
@@ -273,7 +285,7 @@ export function ModelCompare({ onClose }: ModelCompareProps) {
                             onClick={handleCompare}
                             disabled={!prompt.trim() || selectedModels.length < 2 || isComparing}
                             className={`px-5 py-3 rounded-xl font-medium flex items-center gap-2 transition-all ${prompt.trim() && selectedModels.length >= 2 && !isComparing
-                                ? "bg-accent-primary text-white hover:bg-accent-primary/90 shadow-lg shadow-accent-primary/20"
+                                ? "bg-accent-primary text-on-accent hover:bg-accent-primary/90 shadow-lg shadow-accent-primary/20"
                                 : "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
                                 }`}
                         >
@@ -371,6 +383,7 @@ export function ModelCompare({ onClose }: ModelCompareProps) {
                                                         onClick={() => handleCopyResponse(response.content)}
                                                         className="p-1 rounded hover:bg-bg-tertiary text-text-tertiary hover:text-text-primary transition-colors"
                                                         title="Copy response"
+                                                        aria-label="Copy response"
                                                     >
                                                         <CopyIcon size={12} />
                                                     </button>

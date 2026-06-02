@@ -219,7 +219,7 @@ export function Dashboard() {
         <div className="p-3 border-b border-border space-y-2">
           <button
             onClick={handleNewChat}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-accent-primary text-white text-sm hover:bg-accent-primary/90 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-accent-primary text-on-accent text-sm hover:bg-accent-primary/90 transition-colors"
             title="New Chat (Ctrl+N)"
           >
             <PlusIcon size={16} />
@@ -324,11 +324,17 @@ export function Dashboard() {
                               onDragEnd={(e) => {
                                 (e.target as HTMLElement).style.opacity = "1";
                               }}
-                              className={`group flex items-center justify-between px-2 py-2 rounded-lg cursor-grab transition-colors ${activeSessionId.value === session.id
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Open chat ${session.title}`}
+                              className={`group flex items-center justify-between px-2 py-2 rounded-lg cursor-grab transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent-primary ${activeSessionId.value === session.id
                                 ? "bg-accent-primary/10 text-accent-primary"
                                 : "hover:bg-bg-tertiary text-text-primary"
                                 }`}
                               onClick={() => handleLoadSession(session)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleLoadSession(session); }
+                              }}
                             >
                               <span className="text-sm truncate flex-1">{session.title}</span>
                               {/* Branch count badge */}
@@ -604,7 +610,7 @@ export function Dashboard() {
                   {totalDocsLoaded === 0 && (
                     <button
                       onClick={handleAddDocuments}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-white hover:bg-accent-primary/90 transition-colors text-sm font-medium shadow-lg shadow-accent-primary/20"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-primary text-on-accent hover:bg-accent-primary/90 transition-colors text-sm font-medium shadow-lg shadow-accent-primary/20"
                     >
                       <FolderIcon size={16} />
                       Add Documents
@@ -651,7 +657,7 @@ export function Dashboard() {
                 >
                   <div
                     className={`max-w-[80%] rounded-xl px-4 py-3 relative ${message.role === "user"
-                      ? "bg-accent-primary text-white"
+                      ? "bg-accent-primary text-on-accent"
                       : "bg-bg-secondary text-text-primary border border-border"
                       }`}
                   >
@@ -683,7 +689,7 @@ export function Dashboard() {
                       <button
                         onClick={() => handleCopyMessage(message.content, message.id)}
                         className={`p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs ${message.role === "user"
-                          ? "text-white/70 hover:text-white hover:bg-white/10"
+                          ? "text-on-accent opacity-70 hover:opacity-100 hover:bg-black/10"
                           : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
                           }`}
                         title={copiedMessageId === message.id ? "Copied!" : "Copy message"}
@@ -717,7 +723,7 @@ export function Dashboard() {
                       )}
 
                       {message.tokenCount && message.tokenCount > 10 && (
-                        <span className={`text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity ${message.role === "user" ? "text-white/50" : "text-text-tertiary/60"
+                        <span className={`text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity ${message.role === "user" ? "text-on-accent" : "text-text-tertiary/60"
                           }`}>
                           ~{message.tokenCount} tokens
                         </span>
@@ -818,7 +824,7 @@ export function Dashboard() {
                   onClick={handleSubmit}
                   disabled={!currentQuery.value.trim()}
                   className={`p-2 rounded-lg transition-all flex-shrink-0 ${currentQuery.value.trim()
-                    ? "bg-accent-primary text-white hover:bg-accent-primary/90"
+                    ? "bg-accent-primary text-on-accent hover:bg-accent-primary/90"
                     : "bg-bg-tertiary text-text-tertiary cursor-not-allowed"
                     }`}
                   title={currentQuery.value.trim() ? "Send (Enter)" : "Type a message to send"}

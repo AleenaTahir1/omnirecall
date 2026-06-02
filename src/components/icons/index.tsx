@@ -8,6 +8,8 @@ export function LogoIcon({ size = 32, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 100 100"
       fill="none"
       className={className}
@@ -34,6 +36,8 @@ export function SearchIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -61,6 +65,8 @@ export function SendIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -88,6 +94,8 @@ export function SettingsIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -115,6 +123,8 @@ export function ExpandIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -156,6 +166,8 @@ export function CloseIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -183,6 +195,8 @@ export function ClipboardIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -210,6 +224,8 @@ export function CopyIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -237,6 +253,8 @@ export function FolderIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -257,6 +275,8 @@ export function PlusIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -284,6 +304,8 @@ export function DocumentIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -332,6 +354,8 @@ export function ChevronDownIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -352,6 +376,8 @@ export function StarIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -372,6 +398,8 @@ export function RefreshIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -406,6 +434,8 @@ export function ThumbsUpIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -426,6 +456,8 @@ export function ThumbsDownIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -446,6 +478,8 @@ export function MenuIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -480,6 +514,8 @@ export function SpinnerIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={`animate-spin ${className}`}
@@ -507,6 +543,8 @@ export function CheckIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -527,6 +565,8 @@ export function AlertIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -561,6 +601,8 @@ export function KeyIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -595,6 +637,8 @@ export function EyeIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -622,6 +666,8 @@ export function EyeOffIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -660,6 +706,8 @@ export function BranchIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -708,6 +756,8 @@ export function FolderOpenIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -735,6 +785,8 @@ export function DownloadIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -769,6 +821,8 @@ export function UploadIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -803,6 +857,8 @@ export function StopIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -826,6 +882,8 @@ export function CompareIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -864,6 +922,8 @@ export function CommandIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -891,6 +951,8 @@ export function HashIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -932,6 +994,8 @@ export function ChevronRightIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -952,6 +1016,8 @@ export function ChevronLeftIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -972,6 +1038,8 @@ export function RegenerateIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -999,6 +1067,8 @@ export function TrashIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -1026,6 +1096,8 @@ export function EditIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -1046,6 +1118,8 @@ export function TokenIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}
@@ -1073,6 +1147,8 @@ export function MessageIcon({ size = 20, className = "" }: IconProps) {
     <svg
       width={size}
       height={size}
+      aria-hidden="true"
+      focusable="false"
       viewBox="0 0 20 20"
       fill="none"
       className={className}

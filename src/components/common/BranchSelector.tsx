@@ -68,6 +68,9 @@ export function BranchSelector({ className = "" }: BranchSelectorProps) {
             {/* Dropdown Trigger */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
+                aria-haspopup="true"
+                aria-expanded={isOpen}
+                aria-label={`Branch ${branchInfo.name}, ${branchInfo.index + 1} of ${branchInfo.total}. Switch branch`}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 bg-bg-tertiary hover:bg-bg-tertiary/80 rounded-lg text-xs text-text-secondary transition-colors border border-transparent hover:border-border"
             >
                 <BranchIcon size={12} />
@@ -86,12 +89,29 @@ export function BranchSelector({ className = "" }: BranchSelectorProps) {
                     />
 
                     {/* Menu */}
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-20 min-w-[180px] bg-bg-secondary border border-border rounded-lg shadow-lg overflow-hidden">
+                    <div
+                        role="menu"
+                        aria-label="Conversation branches"
+                        className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-20 min-w-[180px] bg-bg-secondary border border-border rounded-lg shadow-lg overflow-hidden"
+                    >
                         {branches.map((branch) => (
                             <div
                                 key={branch.id ?? "main"}
+                                role="menuitemradio"
+                                aria-checked={branch.isActive}
+                                tabIndex={0}
                                 onClick={() => handleSelect(branch.id)}
-                                className={`group flex items-center justify-between gap-2 px-3 py-2 text-xs transition-colors cursor-pointer
+                                onKeyDown={(e) => {
+                                    if (editingId) return;
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        handleSelect(branch.id);
+                                    } else if (e.key === "Escape") {
+                                        setIsOpen(false);
+                                        setEditingId(null);
+                                    }
+                                }}
+                                className={`group flex items-center justify-between gap-2 px-3 py-2 text-xs transition-colors cursor-pointer outline-none focus-visible:bg-bg-tertiary
                   ${branch.isActive
                                         ? "bg-accent-primary/10 text-accent-primary"
                                         : "text-text-secondary hover:bg-bg-tertiary"
@@ -125,6 +145,7 @@ export function BranchSelector({ className = "" }: BranchSelectorProps) {
                                                 onClick={(e) => handleStartRename(e, branch.id!, branch.name)}
                                                 className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-accent-primary rounded transition-opacity"
                                                 title="Rename"
+                                                aria-label={`Rename branch ${branch.name}`}
                                             >
                                                 <EditIcon size={10} />
                                             </button>
@@ -132,6 +153,7 @@ export function BranchSelector({ className = "" }: BranchSelectorProps) {
                                                 onClick={(e) => handleDelete(e, branch.id!)}
                                                 className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-error rounded transition-opacity"
                                                 title="Delete"
+                                                aria-label={`Delete branch ${branch.name}`}
                                             >
                                                 <CloseIcon size={10} />
                                             </button>

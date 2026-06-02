@@ -141,7 +141,7 @@ export function RagDebugPanel() {
                     <button
                         onClick={handleSearch}
                         disabled={searching || !testQuery.trim()}
-                        className="px-3 py-2 bg-accent-primary text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                        className="px-3 py-2 bg-accent-primary text-on-accent rounded-lg text-sm font-medium disabled:opacity-50"
                     >
                         {searching ? <SpinnerIcon size={14} className="animate-spin" /> : "Search"}
                     </button>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
     isCommandPaletteOpen,
     commandPaletteQuery,
@@ -35,8 +36,11 @@ interface Command {
 
 export function CommandPalette() {
     const inputRef = useRef<HTMLInputElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [mode, setMode] = useState<"commands" | "search">("commands");
+    // Trap + restore focus (Escape is handled by the component's own keydown).
+    useFocusTrap(panelRef, isCommandPaletteOpen.value);
 
     const commands: Command[] = [
         {
@@ -217,6 +221,7 @@ export function CommandPalette() {
             aria-label="Command Palette"
         >
             <div
+                ref={panelRef}
                 className="w-full max-w-xl bg-bg-primary border border-border rounded-xl shadow-2xl overflow-hidden animate-scale-in"
                 onClick={(e) => e.stopPropagation()}
             >
@@ -245,6 +250,7 @@ export function CommandPalette() {
                     <button
                         onClick={() => (isCommandPaletteOpen.value = false)}
                         className="p-1 rounded hover:bg-bg-tertiary text-text-tertiary hover:text-text-primary"
+                        aria-label="Close command palette"
                     >
                         <CloseIcon size={14} />
                     </button>
