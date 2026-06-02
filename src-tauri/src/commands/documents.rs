@@ -20,69 +20,84 @@ fn is_allowed_extension(ext: &str) -> bool {
     ALLOWED_EXTENSIONS.iter().any(|allowed| allowed.eq_ignore_ascii_case(ext))
 }
 
+/// Public command: read a document's text for inline display, truncated to a
+/// sane size to avoid blowing the model context window.
 #[tauri::command]
 pub async fn read_document_content(file_path: String) -> Result<String> {
-    // Reject obvious traversal patterns. We cannot meaningfully sandbox the
-    // filesystem here (the user's own dialog picks arbitrary absolute paths)
-    // but we can still refuse paths whose components include `..`, which are
-    // never produced by the dialog and only show up if a caller is trying to
-    // confuse path resolution downstream.
-    if file_path.split(['/', '\\']).any(|s| s == "..") {
-        return Err(AppError::File("Path traversal patterns are not allowed".to_string()));
-    }
+    read_document_text(file_path, Some(100_000)).await
+}
 
-    let path = Path::new(&file_path);
-
-    if !path.exists() {
-        return Err(AppError::File(format!("File not found: {}", file_path)));
-    }
-
-    let metadata = fs::metadata(path).map_err(|e| AppError::File(e.to_string()))?;
-    if !metadata.is_file() {
-        return Err(AppError::File("Path is not a regular file".to_string()));
-    }
-    if metadata.len() > MAX_DOCUMENT_BYTES {
-        return Err(AppError::File(format!(
-            "File too large ({} MB). Maximum supported size is {} MB.",
-            metadata.len() / 1_048_576,
-            MAX_DOCUMENT_BYTES / 1_048_576,
-        )));
-    }
-
-    let extension = path.extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    if !is_allowed_extension(&extension) {
-        return Err(AppError::File(format!("Unsupported file type: .{}", extension)));
-    }
-
-    let content = match extension.as_str() {
-        "pdf" => extract_pdf_text(path)?,
-        "html" | "htm" => {
-            let html = fs::read_to_string(path).map_err(|e| AppError::File(e.to_string()))?;
-            strip_html_tags(&html)
+/// Read and extract a document's text. `max_chars = Some(n)` truncates for
+/// inline display; `None` returns the full text (used by the indexer so we
+/// don't drop content before chunking). The blocking fs read + PDF parse run
+/// off the async runtime via spawn_blocking so they don't stall other commands.
+pub async fn read_document_text(file_path: String, max_chars: Option<usize>) -> Result<String> {
+    let content = tauri::async_runtime::spawn_blocking(move || -> Result<String> {
+        // Reject obvious traversal patterns. We cannot meaningfully sandbox the
+        // filesystem here (the user's own dialog picks arbitrary absolute paths)
+        // but we can still refuse paths whose components include `..`.
+        if file_path.split(['/', '\\']).any(|s| s == "..") {
+            return Err(AppError::File("Path traversal patterns are not allowed".to_string()));
         }
-        _ => {
-            // Text-based formats. Use lossy UTF-8 for files that contain mixed
-            // encodings (e.g. log files) so we still surface readable content.
-            let bytes = fs::read(path).map_err(|e| AppError::File(e.to_string()))?;
-            String::from_utf8(bytes.clone()).unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned())
-        }
-    };
 
-    // Truncate if too long (to avoid token limits)
-    let max_chars = 100_000;
-    if content.len() > max_chars {
-        // Find a valid UTF-8 boundary at or before max_chars
-        let truncated = match content.char_indices().nth(max_chars) {
-            Some((byte_idx, _)) => &content[..byte_idx],
-            None => &content, // fewer than max_chars characters
-        };
-        Ok(format!("{}...\n\n[Content truncated - showing first {} characters]", truncated, max_chars))
-    } else {
-        Ok(content)
+        let path = Path::new(&file_path);
+        if !path.exists() {
+            return Err(AppError::File(format!("File not found: {}", file_path)));
+        }
+
+        let metadata = fs::metadata(path).map_err(|e| AppError::File(e.to_string()))?;
+        if !metadata.is_file() {
+            return Err(AppError::File("Path is not a regular file".to_string()));
+        }
+        if metadata.len() > MAX_DOCUMENT_BYTES {
+            return Err(AppError::File(format!(
+                "File too large ({} MB). Maximum supported size is {} MB.",
+                metadata.len() / 1_048_576,
+                MAX_DOCUMENT_BYTES / 1_048_576,
+            )));
+        }
+
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if !is_allowed_extension(&extension) {
+            return Err(AppError::File(format!("Unsupported file type: .{}", extension)));
+        }
+
+        match extension.as_str() {
+            "pdf" => extract_pdf_text(path),
+            "html" | "htm" => {
+                let html = fs::read_to_string(path).map_err(|e| AppError::File(e.to_string()))?;
+                Ok(strip_html_tags(&html))
+            }
+            _ => {
+                // Text-based formats. Use lossy UTF-8 for files with mixed
+                // encodings (e.g. log files) so we still surface readable text.
+                let bytes = fs::read(path).map_err(|e| AppError::File(e.to_string()))?;
+                Ok(String::from_utf8(bytes.clone())
+                    .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned()))
+            }
+        }
+    })
+    .await
+    .map_err(|e| AppError::File(format!("Document read task failed: {}", e)))??;
+
+    match max_chars {
+        Some(max) if content.len() > max => {
+            // Find a valid UTF-8 boundary at or before max chars.
+            let truncated = match content.char_indices().nth(max) {
+                Some((byte_idx, _)) => &content[..byte_idx],
+                None => &content,
+            };
+            Ok(format!(
+                "{}...\n\n[Content truncated - showing first {} characters]",
+                truncated, max
+            ))
+        }
+        _ => Ok(content),
     }
 }
 
@@ -166,8 +181,9 @@ pub async fn index_document(
     use crate::services::embedding::EmbeddingService;
     use crate::services::vector_store::{VectorStore, DocumentChunk};
     
-    // Read document content
-    let content = match read_document_content(file_path.clone()).await {
+    // Read the FULL document text for indexing (no display truncation) so we
+    // don't silently drop content before chunking.
+    let content = match read_document_text(file_path.clone(), None).await {
         Ok(c) => c,
         Err(e) => return Ok(IndexResult {
             document_id,

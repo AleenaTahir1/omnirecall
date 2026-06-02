@@ -94,7 +94,11 @@ impl AiClient {
         match self.provider.as_str() {
             "gemini" => self.stream_gemini_with_emitter(app, model, message, history, context).await,
             "glm" => self.stream_glm_with_emitter(app, model, message, history, context).await,
-            // Fallback to non-streaming for other providers
+            "openai" => self.stream_openai_with_emitter(app, model, message, history, context).await,
+            "ollama" => self.stream_ollama_with_emitter(app, model, message, history, context).await,
+            // Anthropic (and any unknown provider) falls back to a single
+            // buffered emission. Anthropic's event-based SSE is intentionally
+            // not streamed here to avoid a hard-to-verify parser regression.
             _ => {
                 use tauri::Emitter;
                 let response = self.chat_with_history(model, message, history, context).await?;
@@ -658,6 +662,152 @@ impl AiClient {
             "chunk": "",
             "done": true
         }));
+        Ok(())
+    }
+
+    /// Stream from OpenAI chat completions via SSE (same delta format as GLM).
+    async fn stream_openai_with_emitter(
+        &self,
+        app: &tauri::AppHandle,
+        model: &str,
+        message: &str,
+        history: &[ChatMessage],
+        context: Option<&str>,
+    ) -> Result<()> {
+        use futures::StreamExt;
+        use tauri::Emitter;
+
+        let mut messages = Vec::new();
+        let system_msg = if let Some(ctx) = context {
+            format!("You are a helpful assistant. Use the following document context to answer questions accurately:\n\n{}", ctx)
+        } else {
+            "You are a helpful assistant.".to_string()
+        };
+        messages.push(serde_json::json!({"role": "system", "content": system_msg}));
+        for msg in history {
+            messages.push(serde_json::json!({"role": &msg.role, "content": &msg.content}));
+        }
+        messages.push(serde_json::json!({"role": "user", "content": message}));
+
+        let body = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "temperature": 0.7,
+            "stream": true,
+        });
+
+        let response = self.streaming_client.post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AppError::Network(self.redact(e.to_string())))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AppError::for_status(status.as_u16(), "OpenAI", &self.redact(error_text)));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+        while let Some(chunk_result) = stream.next().await {
+            if STREAM_CANCELLED.load(Ordering::SeqCst) {
+                break;
+            }
+            let chunk = chunk_result.map_err(|e| AppError::Network(self.redact(e.to_string())))?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            for line in buffer.lines().collect::<Vec<_>>() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        continue;
+                    }
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                            let _ = app.emit("chat-stream", serde_json::json!({ "chunk": content, "done": false }));
+                        }
+                    }
+                }
+            }
+            if let Some(last_newline) = buffer.rfind('\n') {
+                buffer = buffer[last_newline + 1..].to_string();
+            }
+        }
+        let _ = app.emit("chat-stream", serde_json::json!({ "chunk": "", "done": true }));
+        Ok(())
+    }
+
+    /// Stream from a local Ollama server. Ollama emits newline-delimited JSON
+    /// ({ message: { content }, done }), not SSE.
+    async fn stream_ollama_with_emitter(
+        &self,
+        app: &tauri::AppHandle,
+        model: &str,
+        message: &str,
+        history: &[ChatMessage],
+        context: Option<&str>,
+    ) -> Result<()> {
+        use futures::StreamExt;
+        use tauri::Emitter;
+
+        let base_url = self.base_url.as_deref().unwrap_or("http://localhost:11434");
+        let mut messages = Vec::new();
+        if let Some(ctx) = context {
+            messages.push(serde_json::json!({
+                "role": "system",
+                "content": format!("Use the following document context to answer questions:\n\n{}", ctx)
+            }));
+        }
+        for msg in history {
+            messages.push(serde_json::json!({"role": &msg.role, "content": &msg.content}));
+        }
+        messages.push(serde_json::json!({"role": "user", "content": message}));
+
+        let body = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": true,
+        });
+
+        let response = self.streaming_client.post(format!("{}/api/chat", base_url))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AppError::Network(self.redact(e.to_string())))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AppError::for_status(status.as_u16(), "Ollama", &self.redact(error_text)));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+        while let Some(chunk_result) = stream.next().await {
+            if STREAM_CANCELLED.load(Ordering::SeqCst) {
+                break;
+            }
+            let chunk = chunk_result.map_err(|e| AppError::Network(self.redact(e.to_string())))?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            // Process complete NDJSON lines, keep the trailing partial in buffer.
+            while let Some(nl) = buffer.find('\n') {
+                let line = buffer[..nl].trim().to_string();
+                buffer = buffer[nl + 1..].to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if let Some(content) = json["message"]["content"].as_str() {
+                        if !content.is_empty() {
+                            let _ = app.emit("chat-stream", serde_json::json!({ "chunk": content, "done": false }));
+                        }
+                    }
+                }
+            }
+        }
+        let _ = app.emit("chat-stream", serde_json::json!({ "chunk": "", "done": true }));
         Ok(())
     }
 }
