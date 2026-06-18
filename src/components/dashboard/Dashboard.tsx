@@ -28,6 +28,7 @@ import {
   isMaximized,
   isOnline,
   minimalMessageStyle,
+  theme,
 } from "../../stores/appStore";
 import { useChatSubmit } from "../../hooks/useChatSubmit";
 import { toast } from "../../stores/toastStore";
@@ -802,12 +803,17 @@ export function Dashboard() {
                 // Skip the empty assistant placeholder while streaming — the
                 // typing indicator stands in for it until the first chunk.
                 if (message.role === "assistant" && !message.content) return null;
-                const minimal = minimalMessageStyle.value;
+                // Transparent (glass) theme → fully monochrome messages, so only
+                // the functional controls keep color.
+                const mono = theme.value === "transparent";
+                const minimal = minimalMessageStyle.value || mono;
                 const isUser = message.role === "user";
                 // Only the classic solid-accent bubble carries on-accent text.
                 const userOnAccent = isUser && !minimal;
                 const bubbleClass = isUser
-                  ? (minimal
+                  ? (mono
+                    ? "bg-text-primary/5 text-text-primary border border-border"
+                    : minimal
                     ? "bg-accent-primary/10 text-text-primary border border-accent-primary/20"
                     : "bg-accent-primary text-on-accent")
                   : (minimal
@@ -913,7 +919,7 @@ export function Dashboard() {
               {isGenerating.value && !currentMessages.value[currentMessages.value.length - 1]?.content && (
                 <div className="flex justify-start">
                   <div className="bg-bg-secondary text-text-primary border border-border rounded-xl px-4 py-3">
-                    <TypingIndicator className="text-accent-primary" />
+                    <TypingIndicator className={theme.value === "transparent" ? "text-text-secondary" : "text-accent-primary"} />
                   </div>
                 </div>
               )}

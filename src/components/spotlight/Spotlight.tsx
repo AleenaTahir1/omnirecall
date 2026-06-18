@@ -9,6 +9,7 @@ import {
   activeSessionId,
   currentMessages,
   minimalMessageStyle,
+  theme,
   addDocument,
   Document,
   stopGeneration,
@@ -249,14 +250,20 @@ export function Spotlight() {
             <div className="p-3 space-y-3">
               {currentMessages.value.map((msg, index) => {
                 if (msg.role === "assistant" && !msg.content) return null;
-                const minimal = minimalMessageStyle.value;
+                // The transparent (glass) theme goes fully monochrome — even the
+                // user bubble drops all blue and uses a neutral translucent fill,
+                // so only the functional controls (send/stop/logo) carry color.
+                const mono = theme.value === "transparent";
+                const minimal = minimalMessageStyle.value || mono;
                 const isUser = msg.role === "user";
                 // Text only sits on the solid accent fill in the classic style;
-                // in minimal style the user bubble is a faint tint, so on-accent
-                // (dark) text would be wrong there.
+                // in minimal/mono style the bubble is faint, so on-accent (dark)
+                // text would be wrong there.
                 const userOnAccent = isUser && !minimal;
                 const bubbleClass = isUser
-                  ? (minimal
+                  ? (mono
+                    ? "bg-text-primary/5 text-text-primary border border-border"
+                    : minimal
                     ? "bg-accent-primary/10 text-text-primary border border-accent-primary/20"
                     : "bg-accent-primary text-on-accent")
                   : (minimal
@@ -314,7 +321,7 @@ export function Spotlight() {
               {isGenerating.value && !currentMessages.value[currentMessages.value.length - 1]?.content && (
                 <div className="flex justify-start">
                   <div className="bg-bg-tertiary rounded-lg px-3 py-2.5">
-                    <TypingIndicator className="text-accent-primary" />
+                    <TypingIndicator className={theme.value === "transparent" ? "text-text-secondary" : "text-accent-primary"} />
                   </div>
                 </div>
               )}
