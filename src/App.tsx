@@ -218,7 +218,7 @@ export function App() {
   }, [theme.value]);
 
   return (
-    <div className={`h-full w-full ${viewMode.value === "spotlight" || theme.value === "transparent" ? "bg-transparent" : "bg-bg-primary"}`}>
+    <div className={`h-full w-full ${viewMode.value === "spotlight" || theme.value === "transparent" ? "bg-transparent" : "bg-surface"}`}>
       {viewMode.value === "spotlight" ? <Spotlight /> : <Dashboard />}
       {isSettingsOpen.value && <Settings />}
       <CommandPalette />

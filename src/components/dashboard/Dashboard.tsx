@@ -27,6 +27,7 @@ import {
   isCommandPaletteOpen,
   isMaximized,
   isOnline,
+  minimalMessageStyle,
 } from "../../stores/appStore";
 import { useChatSubmit } from "../../hooks/useChatSubmit";
 import { toast } from "../../stores/toastStore";
@@ -384,9 +385,9 @@ export function Dashboard() {
   const currentSession = chatHistory.value.find(s => s.id === activeSessionId.value);
 
   return (
-    <div className="h-full w-full flex bg-bg-primary">
+    <div className="h-full w-full flex bg-surface">
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? "w-72" : "w-0"} transition-[width] duration-200 ease-out overflow-hidden border-r border-border bg-bg-secondary flex flex-col`}>
+      <div className={`${sidebarOpen ? "w-72" : "w-0"} transition-[width] duration-200 ease-out overflow-hidden border-r border-border bg-surface-secondary flex flex-col`}>
         {/* Sidebar Header */}
         <div className="p-3 border-b border-border space-y-2">
           <button
@@ -801,17 +802,25 @@ export function Dashboard() {
                 // Skip the empty assistant placeholder while streaming — the
                 // typing indicator stands in for it until the first chunk.
                 if (message.role === "assistant" && !message.content) return null;
+                const minimal = minimalMessageStyle.value;
+                const isUser = message.role === "user";
+                // Only the classic solid-accent bubble carries on-accent text.
+                const userOnAccent = isUser && !minimal;
+                const bubbleClass = isUser
+                  ? (minimal
+                    ? "bg-accent-primary/10 text-text-primary border border-accent-primary/20"
+                    : "bg-accent-primary text-on-accent")
+                  : (minimal
+                    ? "bg-transparent text-text-primary"
+                    : "bg-bg-secondary text-text-primary border border-border");
                 return (
                 <div
                   key={message.id}
-                  className={`group flex ${message.role === "user" ? "justify-end" : "justify-start"} animate-message-reveal`}
+                  className={`group flex ${isUser ? "justify-end" : "justify-start"} animate-message-reveal`}
                   style={{ animationDelay: `${Math.min(index * 50, 200)}ms` }}
                 >
                   <div
-                    className={`max-w-[80%] rounded-xl px-4 py-3 relative ${message.role === "user"
-                      ? "bg-accent-primary text-on-accent"
-                      : "bg-bg-secondary text-text-primary border border-border"
-                      }`}
+                    className={`max-w-[80%] rounded-xl px-4 py-3 relative ${bubbleClass}`}
                   >
                     {/* Branch indicator - show when viewing a branch */}
                     {message.role === "assistant" && activeBranchId.value && index === 0 && (
@@ -837,10 +846,10 @@ export function Dashboard() {
                         copiedMessageId === message.id
                           ? "opacity-100"
                           : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-                      } ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                      } ${isUser ? "justify-end" : "justify-start"}`}>
                       <button
                         onClick={() => handleCopyMessage(message.content, message.id)}
-                        className={`p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs ${message.role === "user"
+                        className={`p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs ${userOnAccent
                           ? "text-on-accent opacity-70 hover:opacity-100 hover:bg-black/10"
                           : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
                           }`}
@@ -851,10 +860,13 @@ export function Dashboard() {
                       </button>
 
                       {/* Edit & resend - user messages only */}
-                      {message.role === "user" && !isGenerating.value && (
+                      {isUser && !isGenerating.value && (
                         <button
                           onClick={() => handleEditMessage(message.id)}
-                          className="p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs text-on-accent opacity-70 hover:opacity-100 hover:bg-black/10"
+                          className={`p-1.5 rounded min-w-[28px] min-h-[28px] flex items-center justify-center text-xs ${userOnAccent
+                            ? "text-on-accent opacity-70 hover:opacity-100 hover:bg-black/10"
+                            : "text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary"
+                            }`}
                           title="Edit & resend"
                           aria-label="Edit and resend message"
                         >
@@ -887,7 +899,7 @@ export function Dashboard() {
                       )}
 
                       {message.tokenCount && message.tokenCount > 10 && (
-                        <span className={`text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity ${message.role === "user" ? "text-on-accent" : "text-text-tertiary/60"
+                        <span className={`text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity ${userOnAccent ? "text-on-accent" : "text-text-tertiary/60"
                           }`}>
                           ~{message.tokenCount} tokens
                         </span>

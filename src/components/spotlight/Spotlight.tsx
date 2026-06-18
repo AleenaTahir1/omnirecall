@@ -8,6 +8,7 @@ import {
   isSettingsOpen,
   activeSessionId,
   currentMessages,
+  minimalMessageStyle,
   addDocument,
   Document,
   stopGeneration,
@@ -248,16 +249,26 @@ export function Spotlight() {
             <div className="p-3 space-y-3">
               {currentMessages.value.map((msg, index) => {
                 if (msg.role === "assistant" && !msg.content) return null;
+                const minimal = minimalMessageStyle.value;
+                const isUser = msg.role === "user";
+                // Text only sits on the solid accent fill in the classic style;
+                // in minimal style the user bubble is a faint tint, so on-accent
+                // (dark) text would be wrong there.
+                const userOnAccent = isUser && !minimal;
+                const bubbleClass = isUser
+                  ? (minimal
+                    ? "bg-accent-primary/10 text-text-primary border border-accent-primary/20"
+                    : "bg-accent-primary text-on-accent")
+                  : (minimal
+                    ? "bg-transparent text-text-primary"
+                    : "bg-bg-tertiary text-text-primary");
                 return (
                 <div
                   key={msg.id}
-                  className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-message-reveal`}
+                  className={`group flex ${isUser ? "justify-end" : "justify-start"} animate-message-reveal`}
                   style={{ animationDelay: `${Math.min(index * 50, 200)}ms` }}
                 >
-                  <div className={`max-w-[90%] rounded-lg px-3 py-2 text-xs relative ${msg.role === "user"
-                    ? "bg-accent-primary text-on-accent"
-                    : "bg-bg-tertiary text-text-primary"
-                    }`}>
+                  <div className={`max-w-[90%] rounded-lg px-3 py-2 text-xs relative ${bubbleClass}`}>
                     {msg.role === "user" ? (
                       <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
                     ) : (
@@ -266,11 +277,11 @@ export function Spotlight() {
 
                     {/* Message Actions */}
                     {msg.content && (
-                      <div className={`flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity ${msg.role === "user" ? "justify-end" : "justify-start"
+                      <div className={`flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? "justify-end" : "justify-start"
                         }`}>
                         <button
                           onClick={() => handleCopyMessage(msg.content, msg.id)}
-                          className={`p-0.5 rounded ${msg.role === "user"
+                          className={`p-0.5 rounded ${userOnAccent
                             ? "text-on-accent opacity-70 hover:opacity-100"
                             : "text-text-tertiary hover:text-text-primary"
                             }`}
@@ -289,7 +300,7 @@ export function Spotlight() {
                           </button>
                         )}
                         {msg.tokenCount && msg.tokenCount > 10 && (
-                          <span className={`text-[10px] ${msg.role === "user" ? "text-on-accent opacity-60" : "text-text-tertiary/60"
+                          <span className={`text-[10px] ${userOnAccent ? "text-on-accent opacity-60" : "text-text-tertiary/60"
                             }`}>
                             ~{msg.tokenCount}
                           </span>

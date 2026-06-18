@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 :root {
+  /* User-controllable window translucency (Settings → Appearance). 1 = the
+     theme's normal opacity, lower = more desktop shows through. Consumed by the
+     main window surfaces below via color-mix. */
+  --ui-opacity: 1;
   --bg-primary: #ffffff;
   --bg-secondary: #f8f9fa;
   --bg-tertiary: #e9ecef;
@@ -132,7 +136,7 @@
 }
 
 .transparent .glass {
-  background: rgba(10, 10, 12, 0.6) !important;
+  background: color-mix(in srgb, rgba(10, 10, 12, 0.6) calc(var(--ui-opacity) * 100%), transparent) !important;
   backdrop-filter: blur(30px) saturate(150%);
   -webkit-backdrop-filter: blur(30px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -258,9 +262,21 @@ button:active {
 }
 
 .glass {
-  background: var(--glass-bg);
+  background: color-mix(in srgb, var(--glass-bg) calc(var(--ui-opacity) * 100%), transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+}
+
+/* Window-shell surfaces that also honor the user's opacity setting. Use these
+   on the outermost backgrounds (app root, dashboard shell, sidebar) so the
+   slider makes the whole window — not just the Spotlight panel — translucent.
+   At --ui-opacity: 1 these resolve to the plain solid color (no visual change). */
+.bg-surface {
+  background-color: color-mix(in srgb, var(--bg-primary) calc(var(--ui-opacity) * 100%), transparent);
+}
+
+.bg-surface-secondary {
+  background-color: color-mix(in srgb, var(--bg-secondary) calc(var(--ui-opacity) * 100%), transparent);
 }
 
 @layer utilities {

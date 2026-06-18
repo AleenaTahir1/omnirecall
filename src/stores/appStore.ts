@@ -78,6 +78,19 @@ export const isGenerating = signal(false);
 export const isSettingsOpen = signal(false);
 export const globalHotkey = signal<string>("Alt+Space");
 
+// Appearance: user-controllable window translucency. 1 = fully opaque (the
+// theme's normal look), lower = more of the desktop shows through. Stored as a
+// CSS variable (--ui-opacity) the main window surfaces color-mix against, so
+// the slider takes effect live without re-rendering anything.
+export const MIN_UI_OPACITY = 0.3;
+export const uiOpacity = signal<number>(1);
+
+// Appearance: when true the user's own messages drop their solid accent bubble
+// for a faint tint, so a question and its answer read almost identically and
+// only differ by a subtle hint + alignment. Off by default (keeps the classic
+// blue user bubble).
+export const minimalMessageStyle = signal<boolean>(false);
+
 // Command Palette State
 export const isCommandPaletteOpen = signal(false);
 export const commandPaletteQuery = signal("");
@@ -320,6 +333,8 @@ export async function flushPendingSaves() {
     await s.set("activeProvider", activeProvider.value);
     await s.set("activeModel", activeModel.value);
     await s.set("systemPrompt", systemPrompt.value);
+    await s.set("uiOpacity", uiOpacity.value);
+    await s.set("minimalMessageStyle", minimalMessageStyle.value);
     await s.save();
   } catch (e) {
     console.error("Failed to flush saves:", e);
@@ -390,6 +405,15 @@ export function searchChatHistory(query: string): SearchResult[] {
 
   searchResults.value = results;
   return results;
+}
+
+/// Push the current UI opacity into a CSS variable on <html>. The main window
+/// surfaces (.glass panel, dashboard shell) color-mix against this, so updating
+/// it here re-paints the translucency live. Clamped to a sane floor so the
+/// window can never become invisible/unclickable.
+export function applyUiOpacity(value: number) {
+  const clamped = Math.min(1, Math.max(MIN_UI_OPACITY, value));
+  document.documentElement.style.setProperty("--ui-opacity", String(clamped));
 }
 
 // Apply theme CSS classes to document root
@@ -479,6 +503,18 @@ export async function loadPersistedData() {
     if (savedTheme) {
       theme.value = savedTheme;
       applyThemeClasses(savedTheme);
+    }
+
+    // Load appearance prefs (window opacity + minimal message style).
+    const savedOpacity = await s.get<number>("uiOpacity");
+    if (typeof savedOpacity === "number" && !Number.isNaN(savedOpacity)) {
+      uiOpacity.value = Math.min(1, Math.max(MIN_UI_OPACITY, savedOpacity));
+    }
+    applyUiOpacity(uiOpacity.value);
+
+    const savedMinimal = await s.get<boolean>("minimalMessageStyle");
+    if (typeof savedMinimal === "boolean") {
+      minimalMessageStyle.value = savedMinimal;
     }
 
     // Load system prompt
@@ -1172,6 +1208,31 @@ export function setTheme(newTheme: Theme) {
   saveTheme();
 }
 
+// Save appearance prefs (opacity + minimal message style) - immediate since
+// they're user-triggered and infrequent.
+export async function saveAppearance() {
+  try {
+    const s = await getStore();
+    await s.set("uiOpacity", uiOpacity.value);
+    await s.set("minimalMessageStyle", minimalMessageStyle.value);
+    await s.save();
+  } catch (e) {
+    console.error("Failed to save appearance:", e);
+  }
+}
+
+export function setUiOpacity(value: number) {
+  const clamped = Math.min(1, Math.max(MIN_UI_OPACITY, value));
+  uiOpacity.value = clamped;
+  applyUiOpacity(clamped);
+  saveAppearance();
+}
+
+export function setMinimalMessageStyle(value: boolean) {
+  minimalMessageStyle.value = value;
+  saveAppearance();
+}
+
 /// Wipe all locally-stored user data: chat history, folders, documents,
 /// API keys, custom models, system prompt, theme. Used by Settings →
 /// "Reset all data". Doesn't clear the Rust-side vector index (call
@@ -1185,6 +1246,10 @@ export async function resetAllData() {
     documents.value = [];
     customModels.value = {};
     systemPrompt.value = "";
+    // Restore appearance prefs to their defaults.
+    uiOpacity.value = 1;
+    minimalMessageStyle.value = false;
+    applyUiOpacity(1);
     activeSessionId.value = null;
     activeBranchId.value = null;
     currentMessages.value = [];

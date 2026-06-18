@@ -9,6 +9,11 @@ import {
   setActiveModel,
   theme,
   setTheme,
+  uiOpacity,
+  setUiOpacity,
+  MIN_UI_OPACITY,
+  minimalMessageStyle,
+  setMinimalMessageStyle,
   viewMode,
   globalHotkey,
   systemPrompt,
@@ -333,6 +338,62 @@ function ProviderCardCompact({ provider }: { provider: any }) {
   );
 }
 
+/// Window translucency slider. Shared by the compact (Spotlight) and full
+/// (Dashboard) Appearance tabs so both stay in sync via the same signal.
+function OpacityControl({ compact = false }: { compact?: boolean }) {
+  const pct = Math.round(uiOpacity.value * 100);
+  const min = Math.round(MIN_UI_OPACITY * 100);
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className={`font-medium text-text-primary ${compact ? "text-xs" : "text-sm"}`}>
+          Window opacity
+        </label>
+        <span className={`text-text-tertiary tabular-nums ${compact ? "text-[10px]" : "text-xs"}`}>{pct}%</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={100}
+        step={5}
+        value={pct}
+        onInput={(e) => setUiOpacity(Number((e.target as HTMLInputElement).value) / 100)}
+        aria-label="Window opacity"
+        className="w-full accent-accent-primary cursor-pointer"
+      />
+      <p className={`text-text-tertiary mt-1 ${compact ? "text-[10px]" : "text-xs"}`}>
+        Lower = more of your desktop shows through the window.
+      </p>
+    </div>
+  );
+}
+
+/// Toggle that flattens the user's own message bubbles so a question and its
+/// answer read almost identically (faint tint + alignment only).
+function MinimalStyleToggle({ compact = false }: { compact?: boolean }) {
+  const on = minimalMessageStyle.value;
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className={`font-medium text-text-primary ${compact ? "text-xs" : "text-sm"}`}>Minimal message style</div>
+        <p className={`text-text-tertiary mt-0.5 ${compact ? "text-[10px]" : "text-xs"}`}>
+          Drop the solid blue on your messages — questions and answers look nearly the same, set apart only by a faint tint and alignment.
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="Minimal message style"
+        onClick={() => setMinimalMessageStyle(!on)}
+        className={`relative shrink-0 w-10 h-6 rounded-full transition-colors ${on ? "bg-accent-primary" : "bg-bg-tertiary border border-border"}`}
+      >
+        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : ""}`} />
+      </button>
+    </div>
+  );
+}
+
 function AppearanceTabCompact() {
   const themes = [
     { id: "dark" as const, label: "Dark", color: "#0d0d0f" },
@@ -343,20 +404,28 @@ function AppearanceTabCompact() {
     { id: "ocean" as const, label: "Ocean", color: "#38bdf8" },
   ];
   return (
-    <div>
-      <label className="text-xs font-medium text-text-primary mb-2 block">Theme</label>
-      <div className="grid grid-cols-3 gap-2">
-        {themes.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTheme(t.id)}
-            className={`px-2 py-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${theme.value === t.id ? "border-accent-primary bg-accent-primary/10 text-accent-primary" : "border-border text-text-secondary hover:border-text-tertiary"
-              }`}
-          >
-            <span className="w-4 h-4 rounded-full border border-border" style={{ background: t.color }} />
-            <span>{t.label}</span>
-          </button>
-        ))}
+    <div className="space-y-4">
+      <div>
+        <label className="text-xs font-medium text-text-primary mb-2 block">Theme</label>
+        <div className="grid grid-cols-3 gap-2">
+          {themes.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTheme(t.id)}
+              className={`px-2 py-2 rounded-lg border text-xs font-medium flex flex-col items-center gap-1 ${theme.value === t.id ? "border-accent-primary bg-accent-primary/10 text-accent-primary" : "border-border text-text-secondary hover:border-text-tertiary"
+                }`}
+            >
+              <span className="w-4 h-4 rounded-full border border-border" style={{ background: t.color }} />
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="pt-1 border-t border-border">
+        <OpacityControl compact />
+      </div>
+      <div className="pt-1 border-t border-border">
+        <MinimalStyleToggle compact />
       </div>
     </div>
   );
@@ -711,6 +780,14 @@ function AppearanceTab() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="pt-4 border-t border-border">
+        <OpacityControl />
+      </div>
+
+      <div className="pt-4 border-t border-border">
+        <MinimalStyleToggle />
       </div>
     </div>
   );
