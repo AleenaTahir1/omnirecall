@@ -3,7 +3,7 @@ import { Store } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
 
 export type ViewMode = "spotlight" | "dashboard";
-export type Theme = "dark" | "light" | "transparent" | "paper" | "rose" | "ocean";
+export type Theme = "dark" | "light" | "white" | "transparent" | "paper" | "rose" | "ocean";
 
 export interface AIProvider {
   id: string;
@@ -419,11 +419,14 @@ export function applyUiOpacity(value: number) {
 // Apply theme CSS classes to document root
 export function applyThemeClasses(newTheme: Theme) {
   const html = document.documentElement;
-  html.classList.remove("dark", "transparent", "paper", "rose", "ocean");
+  html.classList.remove("dark", "white", "transparent", "paper", "rose", "ocean");
 
   switch (newTheme) {
     case "dark":
       html.classList.add("dark");
+      break;
+    case "white":
+      html.classList.add("white");
       break;
     case "transparent":
       html.classList.add("dark", "transparent");

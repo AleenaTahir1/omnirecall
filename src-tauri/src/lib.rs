@@ -5,6 +5,7 @@ mod error;
 
 use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 use std::fs;
+use std::time::{Duration, Instant};
 use tauri::{
     Manager, AppHandle,
     tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent},
@@ -13,13 +14,96 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use crate::config::{AppConfig, get_config_path};
+use crate::config::{AppConfig, get_config_path, load_config, save_config};
 
 // Track if we're in dashboard mode (don't hide on focus loss)
 static IS_DASHBOARD_MODE: AtomicBool = AtomicBool::new(false);
 
 // Track the current hotkey string for re-registration
 static CURRENT_HOTKEY: Mutex<String> = Mutex::new(String::new());
+
+// Timestamp of the last user-driven move/resize. Used to keep the Spotlight
+// window open while it's being dragged or resized: Windows fires a transient
+// focus-loss when entering its modal move/resize loop, which would otherwise
+// trigger the click-away auto-hide and make the window vanish mid-drag.
+static LAST_INTERACTION: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn mark_interaction() {
+    if let Ok(mut t) = LAST_INTERACTION.lock() {
+        *t = Some(Instant::now());
+    }
+}
+
+fn interacted_recently() -> bool {
+    LAST_INTERACTION
+        .lock()
+        .ok()
+        .and_then(|t| *t)
+        .map(|i| i.elapsed() < Duration::from_millis(700))
+        .unwrap_or(false)
+}
+
+/// True when the OS cursor is over (or within a small margin of) the window.
+/// A focus loss while the cursor is still on the window means the user is
+/// dragging the titlebar or pulling a resize border — not clicking away — so we
+/// keep the window visible in that case.
+fn cursor_over_window(window: &tauri::WebviewWindow) -> bool {
+    if let (Ok(cursor), Ok(pos), Ok(size)) =
+        (window.cursor_position(), window.outer_position(), window.outer_size())
+    {
+        let margin = 8.0;
+        let left = pos.x as f64 - margin;
+        let top = pos.y as f64 - margin;
+        let right = pos.x as f64 + size.width as f64 + margin;
+        let bottom = pos.y as f64 + size.height as f64 + margin;
+        cursor.x >= left && cursor.x <= right && cursor.y >= top && cursor.y <= bottom
+    } else {
+        false
+    }
+}
+
+/// Persist the Spotlight window's current size and position so it reopens the
+/// same way next time. Skips dashboard mode (its big layout is transient) and
+/// maximized/fullscreen states (we want the restored "normal" geometry).
+fn save_window_geometry(window: &tauri::WebviewWindow) {
+    if IS_DASHBOARD_MODE.load(Ordering::SeqCst) {
+        return;
+    }
+    if window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+    let size = match window.outer_size() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    // Ignore degenerate sizes (e.g. while minimized) so we never persist a
+    // window the user can't see.
+    if size.width == 0 || size.height == 0 {
+        return;
+    }
+    let mut config = load_config();
+    config.window_width = Some(size.width);
+    config.window_height = Some(size.height);
+    if let Ok(pos) = window.outer_position() {
+        config.window_x = Some(pos.x);
+        config.window_y = Some(pos.y);
+    }
+    save_config(&config);
+}
+
+/// Restore the Spotlight window to its saved size/position, falling back to
+/// centering at the cursor (the classic launcher behavior) on first run.
+fn apply_spotlight_geometry(window: &tauri::WebviewWindow) {
+    let config = load_config();
+    if let (Some(w), Some(h)) = (config.window_width, config.window_height) {
+        let _ = window.set_size(tauri::PhysicalSize::new(w, h));
+    }
+    if let (Some(x), Some(y)) = (config.window_x, config.window_y) {
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    } else {
+        position_window_at_cursor(window);
+    }
+}
 
 fn position_window_at_cursor(window: &tauri::WebviewWindow) {
     // Get cursor position
@@ -66,9 +150,10 @@ fn position_window_at_cursor(window: &tauri::WebviewWindow) {
 
 fn toggle_window(window: &tauri::WebviewWindow) {
     if window.is_visible().unwrap_or(false) {
+        save_window_geometry(window);
         let _ = window.hide();
     } else {
-        position_window_at_cursor(window);
+        apply_spotlight_geometry(window);
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -135,9 +220,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
-            
-            // Position at cursor and show window
-            position_window_at_cursor(&window);
+
+            // Restore the last-used size/position (or center at cursor on first
+            // run), then show the window.
+            apply_spotlight_geometry(&window);
             window.show().unwrap();
             
             // Setup tray menu
@@ -194,11 +280,26 @@ pub fn run() {
             // Handle window events - only hide on focus loss in Spotlight mode
             let window_for_events = window.clone();
             window.on_window_event(move |event| {
-                if let WindowEvent::Focused(false) = event {
-                    // Only hide when losing focus if NOT in dashboard mode
-                    if !IS_DASHBOARD_MODE.load(Ordering::SeqCst) {
-                        let _ = window_for_events.hide();
+                match event {
+                    // Track drag/resize so the focus-loss they trigger doesn't
+                    // dismiss the window, and persist the new geometry.
+                    WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                        mark_interaction();
+                        save_window_geometry(&window_for_events);
                     }
+                    WindowEvent::Focused(false) => {
+                        // Click-away dismissal — but only when this is a genuine
+                        // click elsewhere, not the transient focus loss from
+                        // dragging/resizing the window itself.
+                        if !IS_DASHBOARD_MODE.load(Ordering::SeqCst)
+                            && !interacted_recently()
+                            && !cursor_over_window(&window_for_events)
+                        {
+                            save_window_geometry(&window_for_events);
+                            let _ = window_for_events.hide();
+                        }
+                    }
+                    _ => {}
                 }
             });
             
@@ -231,6 +332,7 @@ pub fn run() {
 
 #[tauri::command]
 async fn hide_window(window: tauri::WebviewWindow) {
+    save_window_geometry(&window);
     let _ = window.hide();
 }
 
@@ -247,10 +349,11 @@ async fn toggle_dashboard(window: tauri::WebviewWindow, is_dashboard: bool) {
         let _ = window.set_always_on_top(false);
         let _ = window.set_skip_taskbar(false);
     } else {
-        let _ = window.set_size(tauri::LogicalSize::new(420, 500));
+        // Back to Spotlight: lift the old hard size cap so the window stays
+        // freely resizable, and restore the user's saved size/position.
         let _ = window.set_min_size(Some(tauri::LogicalSize::new(380, 200)));
-        let _ = window.set_max_size(Some(tauri::LogicalSize::new(500, 700)));
-        position_window_at_cursor(&window);
+        let _ = window.set_max_size(None::<tauri::LogicalSize<u32>>);
+        apply_spotlight_geometry(&window);
         let _ = window.set_always_on_top(true);
         let _ = window.set_skip_taskbar(true);
     }

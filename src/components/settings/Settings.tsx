@@ -397,7 +397,8 @@ function MinimalStyleToggle({ compact = false }: { compact?: boolean }) {
 function AppearanceTabCompact() {
   const themes = [
     { id: "dark" as const, label: "Dark", color: "#0d0d0f" },
-    { id: "light" as const, label: "Light", color: "#ffffff" },
+    { id: "light" as const, label: "Light", color: "#f8f9fa" },
+    { id: "white" as const, label: "White", color: "#ffffff" },
     { id: "transparent" as const, label: "Glass", color: "#1a1a1f" },
     { id: "paper" as const, label: "Paper", color: "#faf8f5" },
     { id: "rose" as const, label: "Rose", color: "#f472b6" },
@@ -752,7 +753,8 @@ function ProviderCard({ provider }: { provider: any }) {
 function AppearanceTab() {
   const themes = [
     { id: "dark" as const, label: "Dark", desc: "Easy on the eyes", color: "#0d0d0f" },
-    { id: "light" as const, label: "Light", desc: "Bright and clean", color: "#ffffff" },
+    { id: "light" as const, label: "Light", desc: "Bright and clean", color: "#f8f9fa" },
+    { id: "white" as const, label: "White", desc: "Pure, like Colab", color: "#ffffff" },
     { id: "transparent" as const, label: "Glass", desc: "Transparent blur", color: "#1a1a1f" },
     { id: "paper" as const, label: "Paper", desc: "Warm cream tones", color: "#faf8f5" },
     { id: "rose" as const, label: "Rose", desc: "Soft pink accent", color: "#f472b6" },

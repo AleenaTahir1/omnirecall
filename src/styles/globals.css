@@ -53,6 +53,28 @@
   --code-text: #d4d4d8;
 }
 
+/* White Theme - clean, fully white like Google Colab's light mode */
+.white {
+  --bg-primary: #ffffff;
+  --bg-secondary: #ffffff;
+  /* Faint Google-grey for inputs, hover states, and code blocks. */
+  --bg-tertiary: #f1f3f4;
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  /* WCAG AA: #70757a ≈ 4.5:1 on white. */
+  --text-tertiary: #70757a;
+  --accent-primary: #1a73e8;
+  --accent-secondary: #1967d2;
+  --border-color: #e0e3e7;
+  --on-accent: #ffffff;
+  --success: #188038;
+  --warning: #b06000;
+  --error: #d93025;
+  --glass-bg: rgba(255, 255, 255, 0.95);
+  --code-block-bg: #f1f3f4;
+  --code-text: #202124;
+}
+
 /* Transparent Glass Theme */
 .transparent {
   --bg-primary: rgba(10, 10, 12, 0.65);
