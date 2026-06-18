@@ -7,7 +7,7 @@ use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 use std::fs;
 use std::time::{Duration, Instant};
 use tauri::{
-    Manager, AppHandle,
+    Manager, AppHandle, Emitter,
     tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent},
     menu::{Menu, MenuItem},
     WindowEvent,
@@ -150,12 +150,15 @@ fn position_window_at_cursor(window: &tauri::WebviewWindow) {
 
 fn toggle_window(window: &tauri::WebviewWindow) {
     if window.is_visible().unwrap_or(false) {
-        save_window_geometry(window);
-        let _ = window.hide();
+        // Ask the UI to fade out; it calls `hide_window` when the fade finishes
+        // (which saves geometry and actually hides the native window).
+        let _ = window.emit("omni://hide", ());
     } else {
         apply_spotlight_geometry(window);
         let _ = window.show();
         let _ = window.set_focus();
+        // Tell the UI to fade in now that the native window is visible.
+        let _ = window.emit("omni://show", ());
     }
 }
 
@@ -290,13 +293,13 @@ pub fn run() {
                     WindowEvent::Focused(false) => {
                         // Click-away dismissal — but only when this is a genuine
                         // click elsewhere, not the transient focus loss from
-                        // dragging/resizing the window itself.
+                        // dragging/resizing the window itself. Fade out via the UI
+                        // rather than hiding instantly.
                         if !IS_DASHBOARD_MODE.load(Ordering::SeqCst)
                             && !interacted_recently()
                             && !cursor_over_window(&window_for_events)
                         {
-                            save_window_geometry(&window_for_events);
-                            let _ = window_for_events.hide();
+                            let _ = window_for_events.emit("omni://hide", ());
                         }
                     }
                     _ => {}

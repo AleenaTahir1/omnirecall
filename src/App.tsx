@@ -1,10 +1,15 @@
 import { useEffect } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
 import { toast } from "./stores/toastStore";
 import {
   viewMode,
   theme,
+  uiVisible,
+  UI_FADE_MS,
+  markUiShown,
+  requestHideWithFade,
   isSettingsOpen,
   isCommandPaletteOpen,
   isCompareMode,
@@ -84,6 +89,13 @@ export function App() {
       })
       .then((fn) => { unlistenDrop = fn; })
       .catch(() => {});
+
+    // Smooth fade on global-shortcut / tray / click-away toggles. The backend
+    // fires these instead of hiding/showing the native window abruptly.
+    let unlistenShow: (() => void) | undefined;
+    let unlistenHide: (() => void) | undefined;
+    listen("omni://show", () => { markUiShown(); }).then((fn) => { unlistenShow = fn; }).catch(() => {});
+    listen("omni://hide", () => { requestHideWithFade(); }).then((fn) => { unlistenHide = fn; }).catch(() => {});
 
     const handleKeyDown = async (e: KeyboardEvent) => {
       // Command Palette (Ctrl+K)
@@ -179,7 +191,7 @@ export function App() {
         if (isSettingsOpen.value) {
           isSettingsOpen.value = false;
         } else if (viewMode.value === "spotlight") {
-          await invoke("hide_window");
+          requestHideWithFade();
         } else {
           // Switch back to spotlight from dashboard
           viewMode.value = "spotlight";
@@ -208,6 +220,8 @@ export function App() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       unlistenDrop?.();
+      unlistenShow?.();
+      unlistenHide?.();
       document.removeEventListener("contextmenu", handleContextMenu);
     };
   }, []);
@@ -218,7 +232,10 @@ export function App() {
   }, [theme.value]);
 
   return (
-    <div className={`h-full w-full ${viewMode.value === "spotlight" || theme.value === "transparent" ? "bg-transparent" : "bg-surface"}`}>
+    <div
+      className={`h-full w-full ${viewMode.value === "spotlight" || theme.value === "transparent" ? "bg-transparent" : "bg-surface"}`}
+      style={{ opacity: uiVisible.value ? 1 : 0, transition: `opacity ${UI_FADE_MS}ms ease` }}
+    >
       {viewMode.value === "spotlight" ? <Spotlight /> : <Dashboard />}
       {isSettingsOpen.value && <Settings />}
       <CommandPalette />

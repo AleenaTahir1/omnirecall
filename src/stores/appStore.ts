@@ -78,6 +78,33 @@ export const isGenerating = signal(false);
 export const isSettingsOpen = signal(false);
 export const globalHotkey = signal<string>("Alt+Space");
 
+// Smooth show/hide. Instead of the native window popping in and out, the whole
+// UI fades via this signal. Every hide routes through requestHideWithFade so the
+// content fades OUT first and only then is the OS window actually hidden — so it
+// never looks like something was abruptly yanked away. Showing is the reverse:
+// the backend reveals the window and fires `omni://show`, and the UI fades in.
+export const uiVisible = signal(true);
+export const UI_FADE_MS = 180;
+
+let hideFadeTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function requestHideWithFade() {
+  if (hideFadeTimer) clearTimeout(hideFadeTimer);
+  uiVisible.value = false;
+  hideFadeTimer = setTimeout(() => {
+    hideFadeTimer = null;
+    invoke("hide_window").catch(() => {});
+  }, UI_FADE_MS);
+}
+
+export function markUiShown() {
+  if (hideFadeTimer) {
+    clearTimeout(hideFadeTimer);
+    hideFadeTimer = null;
+  }
+  uiVisible.value = true;
+}
+
 // Appearance: user-controllable window translucency. 1 = fully opaque (the
 // theme's normal look), lower = more of the desktop shows through. Stored as a
 // CSS variable (--ui-opacity) the main window surfaces color-mix against, so

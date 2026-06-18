@@ -75,7 +75,10 @@
   --code-text: #202124;
 }
 
-/* Transparent Glass Theme */
+/* Transparent Glass Theme — a colorless "ghost" UI: only faint text floats on
+   the blur. Accent and semantic colors all collapse to one light monochrome so
+   nothing reads as blue/green/red, borders vanish, and button fills disappear
+   (see the .transparent overrides further down). */
 .transparent {
   --bg-primary: rgba(10, 10, 12, 0.65);
   --bg-secondary: rgba(26, 26, 31, 0.55);
@@ -83,13 +86,28 @@
   --text-primary: #ffffff;
   --text-secondary: #b0b0b8;
   --text-tertiary: #8e8e96;
-  --accent-primary: #5aafff;
-  --accent-secondary: #9c5aff;
-  --border-color: rgba(255, 255, 255, 0.08);
-  --on-accent: #06203a;
+  --accent-primary: #c2c7d0;
+  --accent-secondary: #c2c7d0;
+  --success: #c2c7d0;
+  --warning: #c2c7d0;
+  --error: #c2c7d0;
+  /* Borders fully invisible. */
+  --border-color: transparent;
+  /* Glyphs/labels that sat on accent fills stay legible once the fill is gone. */
+  --on-accent: #e8eaf0;
   --glass-bg: rgba(10, 10, 12, 0.7);
   --code-block-bg: rgba(15, 15, 25, 0.8);
   --code-text: #d4d4d8;
+}
+
+/* Ghost overrides: drop solid accent/semantic button fills so only the glyph
+   shows, and make the floating glass panel edgeless. */
+.transparent .bg-accent-primary,
+.transparent .bg-accent-secondary,
+.transparent .bg-error,
+.transparent .bg-success,
+.transparent .bg-warning {
+  background-color: transparent !important;
 }
 
 /* Paper/Cream Theme - T3 Chat Inspired */
@@ -161,7 +179,7 @@
   background: color-mix(in srgb, rgba(10, 10, 12, 0.6) calc(var(--ui-opacity) * 100%), transparent) !important;
   backdrop-filter: blur(30px) saturate(150%);
   -webkit-backdrop-filter: blur(30px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-color: transparent !important;
 }
 
 * {

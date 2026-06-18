@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { CloseIcon } from "../icons";
+import { requestHideWithFade } from "../../stores/appStore";
 
 // Icons for window controls
 function MinimizeIcon({ size = 16 }: { size?: number }) {
@@ -80,7 +81,7 @@ export function WindowControls({
         if (onClose) {
             onClose();
         } else {
-            await invoke("hide_window");
+            requestHideWithFade();
         }
     };
 

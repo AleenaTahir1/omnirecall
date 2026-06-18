@@ -10,6 +10,7 @@ import {
   currentMessages,
   minimalMessageStyle,
   theme,
+  requestHideWithFade,
   addDocument,
   Document,
   stopGeneration,
@@ -190,7 +191,7 @@ export function Spotlight() {
               <ExpandIcon size={14} />
             </button>
             <button
-              onClick={() => invoke("hide_window")}
+              onClick={requestHideWithFade}
               className="p-1.5 rounded-md hover:bg-bg-tertiary transition-colors text-text-tertiary hover:text-text-primary"
               title="Close (Esc)"
               aria-label="Close window"
